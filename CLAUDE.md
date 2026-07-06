@@ -62,13 +62,14 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 | | staff | manager | admin |
 |--|:--:|:--:|:--:|
 | Bulletin board (create/edit/delete) | O | O | O |
+| View notices (read `t_noticeboard`) | O | O | O |
 | View announcements | O | O | O |
 | Create/edit/delete announcements | X | O | O |
 | Create/edit/delete schedules | X | O | O |
 | Send push notifications | X | X | O (or LMS API Key) |
 | Weekly vision (create/edit/delete) | X | O | O |
 
-Announcement `target_role` visibility: staff sees `all/staff`, manager/admin see `all/staff/manager` (`announcement_service._VISIBLE_ROLES`).
+Announcement `target_role` visibility: staff sees `all/staff`, manager/admin see `all/staff/manager` (`announcement_service._VISIBLE_ROLES`). This visibility (plus the publish/expire window) is enforced on **both** the list and the single `GET /announcements/{id}` fetch, so a lower role can't read a higher-targeted (or unpublished/expired) announcement by iterating ids.
 
 ## Attendance QR Flow
 
@@ -106,8 +107,8 @@ Push uses the Expo Push API over HTTP (`httpx`). Code: `app/utils/expo_push.py` 
 - `notification_service.prepare_notification` (runs in the request transaction, via `get_db`): writes a `t_notification_log` row with `status="pending"` (`db.flush()` to get `log.id`), then creates `t_notification_recipient` rows for each target user. The controller (`POST /send`) then schedules `dispatch_notification` via FastAPI `BackgroundTasks` and returns immediately. The request transaction commits (log + recipients) **before** the background task runs.
 - `notification_service.dispatch_notification` (runs after the response, in its **own** short-lived sessions from `AsyncSessionLocal` — must `commit()` explicitly since there's no `get_db`): reads active tokens (session closed before the HTTP call), sends push while holding **no** DB connection, then reopens a session to update `log.status`/`push_response`/`sent_at` and deactivate dead tokens. This is the fix for the old design that held a pooled connection open across the multi-second Expo call.
 - The `t_notification_log` row stores the **original HTML** `title`/`body` (used for in-app notification modal rendering). Before sending to Expo, both are run through `_strip_html()` (stdlib `re` + `html.unescape`) so OS push banners show clean plain text — tags removed, entities decoded, whitespace collapsed. DB keeps HTML; the banner gets plain text.
-- Target `user_ids` are always filtered to IDs that actually exist in `t_user` (`SELECT id ... WHERE id IN (...)`), which also de-duplicates — this both prevents FK violations from bad LMS input and avoids `(notification_id, user_id)` unique-constraint rollbacks. If `user_ids` is null, broadcasts to all active tokens and creates recipient records for all users in `t_user`.
-- Final `status` starts `pending` and is updated by the background task: `sent` if Expo reports ≥1 success, else `failed`; `push_response` records `success=N failure=M`. Because dispatch is out-of-band, a process restart before it runs can leave a row stuck at `pending`.
+- Target `user_ids` are filtered to IDs that actually exist in `t_user` **and are not soft-deleted (`del_yn='N'`)** (`SELECT id ... WHERE id IN (...) AND del_yn='N'`), which also de-duplicates — preventing FK violations from bad LMS input and `(notification_id, user_id)` unique-constraint rollbacks. `user_ids = null` broadcasts to all active (non-deleted) users; `user_ids = []` (empty list) targets **nobody** — it is **not** treated as a broadcast (the code checks `is not None`, not truthiness). The broadcast token query in `dispatch_notification` joins `t_user` and excludes `del_yn='Y'`, so terminated employees' devices don't receive internal notices.
+- Final `status` starts `pending` and is updated by the background task: `sent` if Expo reports ≥1 success, else `failed`; `push_response` records `success=N failure=M`. `dispatch_notification` wraps its whole body in a top-level `try/except` that best-effort marks the log `failed` (in a fresh session) on any DB error, so a DB failure during dispatch no longer silently strands the row at `pending`. Only a process death before/at dispatch can still leave a row `pending`.
 - `send_push_notifications` is a blocking call — offloaded via `anyio.to_thread.run_sync` so it doesn't block the event loop.
 - Batched to Expo's **100-message-per-request** limit.
 - Tokens Expo reports as `DeviceNotRegistered` are auto-deactivated (`is_active = False`) so dead tokens stop accumulating.
@@ -121,13 +122,34 @@ Push uses the Expo Push API over HTTP (`httpx`). Code: `app/utils/expo_push.py` 
 **Runtime requirements (production):**
 - No extra pip installs — `httpx` and `anyio` are already pinned in `requirements.txt`. No service-account file or credentials are required (Expo's public push endpoint).
 
+## Notice Board (Notice)
+
+Read-only "Notice" feature over `t_noticeboard` — the **same table** the "bulletin" CRUD writes to. Code: `app/services/notice_service.py`, `app/controllers/notice.py`, `app/models/branch.py` (`t_branch`), `app/schemas/notice.py`. Mirrors the DB stored procedures `usp_selnoticeboard` / `usp_selnoticedetail` (referenced, not called — logic is replicated in the service).
+
+**Endpoints** (under `/api/v1/notices`, auth: `get_current_user`):
+- `GET ` (no trailing slash) — paginated list; each item: `id`, `regdate` (`YYYY-MM-DD` string), `branch` (label), `title`.
+- `GET /{notice_id}` — detail: adds `details` (HTML) and `noticed_by` (author `loginid`, uppercased).
+
+**Branch visibility:** a user sees only notices where `bid = '%'` (ALL) **or** `bid = <their branch>` (`t_user.bid`). Cross-branch notices are hidden from the list and return 404 when fetched by id (IDOR-safe). To instead show every branch's notices to everyone, drop the `bid` filter in `notice_service._allowed_bids`.
+
+**t_noticeboard semantics:**
+- `bid` is a **string**: `'%'` = ALL, else a branch id (e.g. `'4'`). Branch label = `'ALL'` for `'%'`, else `t_branch.fullname` (join `t_branch.bid`, an int — MySQL implicit-casts the string).
+- `wid` stores **`t_user.id`** (author), despite the name — "noticed by" is that user's `loginid`. (See the DB Notes caveat: `bulletin_service.create_post` instead writes the employee number.)
+- `title`/`details` may be HTML with inline links and large base64 images — the app renders `details` via `RenderHtml` (safe link/tag props). Some rows are multi-MB.
+
+## Rate Limiting
+
+App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login/refresh (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
+
+**Deployment note:** the API runs behind **Apache2** (`mod_proxy_http`) on Ubuntu (managed by systemd). Apache appends the real client IP to the **end** of `X-Forwarded-For`, so `_client_ip()` reads the **rightmost** value. Using the first value would let a client spoof `X-Forwarded-For` to get a fresh bucket per request and bypass every limit.
+
 ## DB Notes
 
 Alembic is not used — models are written to match existing DB tables directly.
 
 The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABASE_URL` property in `config.py` auto-converts `DATABASE_URL` from pymysql → aiomysql.
 
-`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.wid` is the employee number used in other tables (bulletin, etc.). `t_user.bid` is the branch/location ID.
+`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.wid` is the employee number used in other tables (bulletin, etc.). `t_user.bid` is the branch/location ID. Caveat: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author), while `bulletin_service.create_post` writes the employee number there — an inconsistency to reconcile if notices are ever created via the app (see the Notice Board section).
 
 **Soft deletes:** legacy tables use a `del_yn` / `delyn` CHAR(1) column (`'N'` = active, `'Y'` = deleted). Services must filter `del_yn = 'N'` on reads. Newer tables (e.g. `t_weekly_vision`) use `is_hidden` instead.
 
