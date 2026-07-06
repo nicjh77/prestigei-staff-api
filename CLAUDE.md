@@ -131,7 +131,7 @@ Read-only "Notice" feature over `t_noticeboard` — the **same table** the "bull
 
 **t_noticeboard semantics:**
 - `bid` is a **string**: `'%'` = ALL, else a branch id (e.g. `'4'`). Branch label = `'ALL'` for `'%'`, else `t_branch.fullname` (join `t_branch.bid`, an int — MySQL implicit-casts the string).
-- `wid` stores **`t_user.id`** (author), despite the name — "noticed by" is that user's `loginid`. (See the DB Notes caveat: `bulletin_service.create_post` instead writes the employee number.)
+- `wid` stores **`t_user.id`** (author), despite the name — "noticed by" is that user's `loginid`. Writes are owned by the LMS (see below), which must set `wid = t_user.id` for the author to resolve.
 - `title`/`details` may be HTML with inline links and large base64 images — the app renders `details` via `RenderHtml` (safe link/tag props). Some rows are multi-MB.
 
 ## Rate Limiting
@@ -146,7 +146,7 @@ Alembic is not used — models are written to match existing DB tables directly.
 
 The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABASE_URL` property in `config.py` auto-converts `DATABASE_URL` from pymysql → aiomysql.
 
-`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.wid` is the employee number used in other tables (bulletin, etc.). `t_user.bid` is the branch/location ID. Caveat: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author), while `bulletin_service.create_post` writes the employee number there — an inconsistency to reconcile if notices are ever created via the app (see the Notice Board section).
+`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.wid` is the employee number used in some other tables. `t_user.bid` is the branch/location ID. Note: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author). Since the Staff API no longer writes notices (the LMS writes them directly to the DB), the LMS must set `wid = t_user.id` for "noticed by" to resolve correctly.
 
 **Soft deletes:** legacy tables use a `del_yn` / `delyn` CHAR(1) column (`'N'` = active, `'Y'` = deleted). Services must filter `del_yn = 'N'` on reads. Newer tables (e.g. `t_weekly_vision`) use `is_hidden` instead.
 
