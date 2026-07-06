@@ -6,10 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.announcement import Announcement, AnnouncementRead
 from app.models.user import User
-from app.schemas.announcement import AnnouncementCreate, AnnouncementUpdate
-from app.services._common import apply_updates
 
-
+# 읽기 전용: 공지 생성/수정/삭제는 LMS가 DB에 직접 수행한다. 이 서비스는 조회만 제공.
 _VISIBLE_ROLES: dict[str, list[str]] = {
     "staff":   ["all", "staff"],
     "manager": ["all", "staff", "manager"],
@@ -74,27 +72,3 @@ async def get_unread_count(db: AsyncSession, user: User) -> int:
     base = base.where(Announcement.id.not_in(read_ids))
     result = await db.execute(select(func.count()).select_from(base.subquery()))
     return result.scalar_one()
-
-
-async def create_announcement(db: AsyncSession, user: User, data: AnnouncementCreate) -> Announcement:
-    ann = Announcement(author_id=user.id, **data.model_dump())
-    db.add(ann)
-    await db.flush()
-    return ann
-
-
-async def update_announcement(db: AsyncSession, announcement_id: int, data: AnnouncementUpdate) -> Announcement:
-    result = await db.execute(select(Announcement).where(Announcement.id == announcement_id, Announcement.deleted_at.is_(None)))
-    ann = result.scalar_one_or_none()
-    if ann is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
-    apply_updates(ann, data)
-    return ann
-
-
-async def delete_announcement(db: AsyncSession, announcement_id: int) -> None:
-    result = await db.execute(select(Announcement).where(Announcement.id == announcement_id, Announcement.deleted_at.is_(None)))
-    ann = result.scalar_one_or_none()
-    if ann is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
-    ann.deleted_at = datetime.now(timezone.utc)

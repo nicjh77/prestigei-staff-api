@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.announcement import AnnouncementCreate, AnnouncementOut, AnnouncementUpdate, UnreadCountOut
-from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.announcement import AnnouncementOut, UnreadCountOut
+from app.schemas.common import PaginatedResponse
 from app.services import announcement_service
 
+# 읽기 전용: 공지 생성/수정/삭제는 LMS가 DB에 직접 수행한다. 이 API는 조회만 제공.
 router = APIRouter(tags=["Announcements"])
 
 
@@ -47,25 +48,3 @@ async def get_announcement(announcement_id: int, current_user: User = Depends(ge
         priority=ann.priority, publish_at=ann.publish_at, expire_at=ann.expire_at,
         is_read=True, created_at=ann.created_at,
     )
-
-
-@router.post("", response_model=AnnouncementOut)
-async def create_announcement(data: AnnouncementCreate, current_user: User = Depends(require_manager), db: AsyncSession = Depends(get_db)):
-    ann = await announcement_service.create_announcement(db, current_user, data)
-    return AnnouncementOut(
-        id=ann.id, title=ann.title, content=ann.content, target_role=ann.target_role,
-        priority=ann.priority, publish_at=ann.publish_at, expire_at=ann.expire_at,
-        is_read=False, created_at=ann.created_at,
-    )
-
-
-@router.put("/{announcement_id}", response_model=MessageResponse)
-async def update_announcement(announcement_id: int, data: AnnouncementUpdate, current_user: User = Depends(require_manager), db: AsyncSession = Depends(get_db)):
-    await announcement_service.update_announcement(db, announcement_id, data)
-    return MessageResponse(message="Announcement updated")
-
-
-@router.delete("/{announcement_id}", response_model=MessageResponse)
-async def delete_announcement(announcement_id: int, current_user: User = Depends(require_manager), db: AsyncSession = Depends(get_db)):
-    await announcement_service.delete_announcement(db, announcement_id)
-    return MessageResponse(message="Announcement deleted")

@@ -5,12 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import APP_TZ
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_manager
+from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.common import MessageResponse
-from app.schemas.schedule import ScheduleCreate, ScheduleOut, ScheduleUpdate
+from app.schemas.schedule import ScheduleOut
 from app.services import schedule_service
 
+# 읽기 전용: 스케줄 생성/수정/삭제는 LMS가 DB에 직접 수행한다. 이 API는 조회만 제공.
 router = APIRouter(tags=["Schedule"])
 
 
@@ -33,34 +33,3 @@ async def get_schedule(
 ):
     schedules = await schedule_service.get_schedule(db, current_user.tid, from_date, to_date)
     return [ScheduleOut.model_validate(s) for s in schedules]
-
-
-@router.post("", response_model=ScheduleOut)
-async def create_schedule(
-    data: ScheduleCreate,
-    current_user: User = Depends(require_manager),
-    db: AsyncSession = Depends(get_db),
-):
-    schedule = await schedule_service.create_schedule(db, data, current_user.wid)
-    return ScheduleOut.model_validate(schedule)
-
-
-@router.put("/{schedule_id}", response_model=ScheduleOut)
-async def update_schedule(
-    schedule_id: int,
-    data: ScheduleUpdate,
-    current_user: User = Depends(require_manager),
-    db: AsyncSession = Depends(get_db),
-):
-    schedule = await schedule_service.update_schedule(db, schedule_id, data, current_user.wid)
-    return ScheduleOut.model_validate(schedule)
-
-
-@router.delete("/{schedule_id}", response_model=MessageResponse)
-async def delete_schedule(
-    schedule_id: int,
-    current_user: User = Depends(require_manager),
-    db: AsyncSession = Depends(get_db),
-):
-    await schedule_service.delete_schedule(db, schedule_id)
-    return MessageResponse(message="Schedule deleted")

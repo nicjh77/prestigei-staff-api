@@ -59,15 +59,12 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 - Inject `get_current_user` / `require_manager` / `require_admin` from `app/core/dependencies.py` via `Depends`
 
 **Role permissions:**
-| | staff | manager | admin |
+| Action | staff | manager | admin |
 |--|:--:|:--:|:--:|
-| Bulletin board (create/edit/delete) | O | O | O |
-| View notices (read `t_noticeboard`) | O | O | O |
-| View announcements | O | O | O |
-| Create/edit/delete announcements | X | O | O |
-| Create/edit/delete schedules | X | O | O |
+| View notices / announcements / schedule / bulletin / weekly vision | O | O | O |
 | Send push notifications | X | X | O (or LMS API Key) |
-| Weekly vision (create/edit/delete) | X | O | O |
+
+**This API is read-only for content.** Schedules, announcements, bulletin/notice posts, and weekly vision are created/edited/deleted **directly in the DB by the LMS** — the Staff API's write routes (`POST/PUT/DELETE` on `/schedule`, `/announcements`, `/bulletin`) were **removed**; only `GET` remains. The one content-mutating endpoint is `POST /notifications/send` (admin JWT or LMS `X-API-Key`). Per-user self-service writes remain: `PATCH /users/me` (profile) and `POST /users/me/password`.
 
 Announcement `target_role` visibility: staff sees `all/staff`, manager/admin see `all/staff/manager` (`announcement_service._VISIBLE_ROLES`). This visibility (plus the publish/expire window) is enforced on **both** the list and the single `GET /announcements/{id}` fetch, so a lower role can't read a higher-targeted (or unpublished/expired) announcement by iterating ids.
 

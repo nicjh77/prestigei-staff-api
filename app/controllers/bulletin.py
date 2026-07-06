@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.bulletin import PostCreate, PostOut, PostUpdate
-from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.bulletin import PostOut
+from app.schemas.common import PaginatedResponse
 from app.services import bulletin_service
 
+# 읽기 전용: 게시글 생성/수정/삭제는 LMS가 DB에 직접 수행한다. 이 API는 조회만 제공.
 router = APIRouter(tags=["Bulletin"])
 
 
@@ -34,21 +35,3 @@ async def list_posts(
 async def get_post(post_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     post = await bulletin_service.get_post(db, post_id)
     return PostOut.model_validate(post)
-
-
-@router.post("", response_model=PostOut)
-async def create_post(data: PostCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    post = await bulletin_service.create_post(db, current_user, data)
-    return PostOut.model_validate(post)
-
-
-@router.put("/{post_id}", response_model=MessageResponse)
-async def update_post(post_id: int, data: PostUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    await bulletin_service.update_post(db, post_id, current_user, data)
-    return MessageResponse(message="Post updated")
-
-
-@router.delete("/{post_id}", response_model=MessageResponse)
-async def delete_post(post_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    await bulletin_service.delete_post(db, post_id, current_user)
-    return MessageResponse(message="Post deleted")
