@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.production
+
+*.json
+!.env.example
+.pytest_cache/
+.mypy_cache/
