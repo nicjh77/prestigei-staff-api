@@ -6,8 +6,9 @@
 한계:
 - 프로세스 메모리 기반이라 재시작 시 카운터 초기화, 워커 다중 구동 시 워커별 독립.
   (현재 배포는 단일 프로세스 `uvicorn main:app` 이므로 문제 없음.)
-- 리버스 프록시(nginx) 뒤라면 클라이언트 IP는 `X-Forwarded-For` 첫 값을 사용한다.
-  더 강한 방어가 필요하면 nginx `limit_req`와 병행 권장.
+- Apache 리버스 프록시 뒤 배포이므로 클라이언트 IP는 `X-Forwarded-For`의 '맨 뒤'
+  값(프록시가 덧붙인 실제 클라이언트)을 사용한다. 첫 값은 클라이언트가 위조할 수 있다.
+  더 강한 방어가 필요하면 Apache `mod_remoteip` + `mpm` 단의 요청 제한과 병행 권장.
 """
 
 import time
@@ -67,10 +68,12 @@ _limiter = SlidingWindowLimiter()
 
 
 def _client_ip(request: Request) -> str:
-    # nginx 등 프록시 뒤에서는 X-Forwarded-For 첫 IP가 실제 클라이언트
+    # Apache(mod_proxy_http)는 실제 클라이언트 IP를 X-Forwarded-For '맨 뒤'에 덧붙인다.
+    # 클라이언트가 스푸핑해 보낸 값은 앞쪽에 남으므로, 신뢰 프록시(Apache)가 붙인
+    # 마지막 값을 써야 위조로 rate limit을 우회하지 못한다.
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        return xff.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 

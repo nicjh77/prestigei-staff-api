@@ -48,7 +48,9 @@ async def list_announcements(db: AsyncSession, user: User, unread_only: bool, pa
 
 
 async def get_announcement(db: AsyncSession, announcement_id: int, user: User) -> Announcement:
-    result = await db.execute(select(Announcement).where(Announcement.id == announcement_id, Announcement.deleted_at.is_(None)))
+    # 목록과 동일한 가시성 필터 적용 — 역할/게시/만료 조건을 우회한 id 직접 조회(IDOR) 차단
+    stmt = _active_filter(select(Announcement), user.user_role).where(Announcement.id == announcement_id)
+    result = await db.execute(stmt)
     ann = result.scalar_one_or_none()
     if ann is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")

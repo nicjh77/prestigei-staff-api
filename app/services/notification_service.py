@@ -1,10 +1,13 @@
 import html as html_lib
+import logging
 import re
 from datetime import datetime, timezone
 
 import anyio
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import AsyncSessionLocal
 from app.models.notification import NotificationLog, NotificationRecipient, PushToken
@@ -54,13 +57,14 @@ async def prepare_notification(db: AsyncSession, data: SendNotificationRequest) 
     db.add(log)
     await db.flush()  # log.id 확보 (recipient 생성에 필요)
 
-    # 대상 user_id 확정 — 항상 t_user에 실제 존재하는 id로만 필터링.
-    # (LMS가 없는 id를 보내도 FK 위반으로 전체 트랜잭션이 롤백되지 않게 하고,
+    # 대상 user_id 확정 — 항상 t_user에 실제 존재하고 소프트 삭제되지 않은(del_yn='N')
+    # id로만 필터링. (LMS가 없는 id를 보내도 FK 위반으로 전체 트랜잭션이 롤백되지 않게 하고,
     #  IN 절이 중복도 자연스럽게 제거해 (notification_id, user_id) unique 위반 방지)
-    if data.user_ids:
-        result = await db.execute(select(User.id).where(User.id.in_(data.user_ids)))
-    else:
-        result = await db.execute(select(User.id))  # 브로드캐스트
+    # user_ids가 None이면 브로드캐스트, 빈 리스트([])면 '대상 없음'(전체 발송 아님)이다.
+    base = select(User.id).where(User.del_yn == "N")
+    if data.user_ids is not None:
+        base = base.where(User.id.in_(data.user_ids))
+    result = await db.execute(base)
     target_ids = [row[0] for row in result.all()]
 
     if target_ids:
@@ -85,48 +89,68 @@ async def dispatch_notification(
     요청 트랜잭션과 분리된 자체 세션을 쓰며, 외부 HTTP 호출(가장 오래 걸리는 구간)
     동안에는 DB 커넥션을 반납한 상태로 대기한다.
     """
-    # 1) 활성 토큰 조회 — 짧은 세션, 조회 후 커넥션 즉시 반납
-    async with AsyncSessionLocal() as session:
-        query = select(PushToken.push_token).where(PushToken.is_active == True)  # noqa: E712
-        if user_ids:
-            query = query.where(PushToken.user_id.in_(user_ids))
-        tokens = [row[0] for row in (await session.execute(query)).all()]
-
-    # 2) 푸시 발송 — DB 커넥션을 잡지 않은 상태로 외부 HTTP 수행
-    invalid_tokens: list[str] = []
-    if not tokens:
-        status_val = "sent"
-        response_val = "no active tokens"
-    else:
-        try:
-            # DB에는 HTML 원본 저장, 배너에는 plain text 전송
-            send_result = await anyio.to_thread.run_sync(
-                send_push_notifications, tokens, _strip_html(title), _strip_html(body), data or {}
+    try:
+        # 1) 활성 토큰 조회 — 짧은 세션, 조회 후 커넥션 즉시 반납.
+        #    소프트 삭제된 사용자(del_yn='Y')의 토큰은 제외. user_ids가 None이면 브로드캐스트.
+        async with AsyncSessionLocal() as session:
+            query = (
+                select(PushToken.push_token)
+                .join(User, User.id == PushToken.user_id)
+                .where(PushToken.is_active == True, User.del_yn == "N")  # noqa: E712
             )
-            invalid_tokens = send_result.invalid_tokens
-            status_val = "sent" if send_result.success_count > 0 else "failed"
-            response_val = (
-                f"success={send_result.success_count} failure={send_result.failure_count}"
-                + (f" | {send_result.errors[0]}" if send_result.errors else "")
-            )
-        except Exception as e:
-            status_val = "failed"
-            response_val = str(e)
+            if user_ids is not None:
+                query = query.where(PushToken.user_id.in_(user_ids))
+            tokens = [row[0] for row in (await session.execute(query)).all()]
 
-    # 3) 로그 상태 갱신 + Expo가 DeviceNotRegistered로 보고한 죽은 토큰 비활성화
-    #    (짧은 세션 — 백그라운드 태스크라 get_db가 없으므로 명시적으로 커밋)
-    async with AsyncSessionLocal() as session:
-        values: dict = {"status": status_val, "push_response": response_val[:500]}
-        if status_val == "sent":
-            values["sent_at"] = datetime.now(timezone.utc)
-        await session.execute(
-            update(NotificationLog).where(NotificationLog.id == log_id).values(**values)
-        )
-        if invalid_tokens:
+        # 2) 푸시 발송 — DB 커넥션을 잡지 않은 상태로 외부 HTTP 수행
+        invalid_tokens: list[str] = []
+        if not tokens:
+            status_val = "sent"
+            response_val = "no active tokens"
+        else:
+            try:
+                # DB에는 HTML 원본 저장, 배너에는 plain text 전송
+                send_result = await anyio.to_thread.run_sync(
+                    send_push_notifications, tokens, _strip_html(title), _strip_html(body), data or {}
+                )
+                invalid_tokens = send_result.invalid_tokens
+                status_val = "sent" if send_result.success_count > 0 else "failed"
+                response_val = (
+                    f"success={send_result.success_count} failure={send_result.failure_count}"
+                    + (f" | {send_result.errors[0]}" if send_result.errors else "")
+                )
+            except Exception as e:
+                status_val = "failed"
+                response_val = str(e)
+
+        # 3) 로그 상태 갱신 + Expo가 DeviceNotRegistered로 보고한 죽은 토큰 비활성화
+        #    (짧은 세션 — 백그라운드 태스크라 get_db가 없으므로 명시적으로 커밋)
+        async with AsyncSessionLocal() as session:
+            values: dict = {"status": status_val, "push_response": response_val[:500]}
+            if status_val == "sent":
+                values["sent_at"] = datetime.now(timezone.utc)
             await session.execute(
-                update(PushToken).where(PushToken.push_token.in_(invalid_tokens)).values(is_active=False)
+                update(NotificationLog).where(NotificationLog.id == log_id).values(**values)
             )
-        await session.commit()
+            if invalid_tokens:
+                await session.execute(
+                    update(PushToken).where(PushToken.push_token.in_(invalid_tokens)).values(is_active=False)
+                )
+            await session.commit()
+    except Exception:
+        # 백그라운드 태스크 예외는 응답 이후라 삼켜진다 — DB 조회/갱신 실패로 로그가 'pending'에
+        # 영구 방치되지 않도록, 별도 세션에서 best-effort로 'failed' 기록.
+        logger.exception("dispatch_notification failed (log_id=%s)", log_id)
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(NotificationLog)
+                    .where(NotificationLog.id == log_id)
+                    .values(status="failed", push_response="dispatch error")
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("failed to mark notification log %s as failed", log_id)
 
 
 async def get_notifications(db: AsyncSession, user_id: int, page: int, size: int) -> dict:
