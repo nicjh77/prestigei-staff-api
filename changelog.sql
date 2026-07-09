@@ -112,3 +112,15 @@ ALTER TABLE `t_datelist`
 --     `holidayyn` = VALUES(`holidayyn`),
 --     `holidaynm` = VALUES(`holidaynm`),
 --     `bid` = VALUES(`bid`);
+
+
+-- =============================================
+-- 2026-07-09  t_schedule 일반 직원 일정 지원 (tid nullable + uid)
+-- =============================================
+-- 아래 두 건은 이미 프로덕션/로컬에 적용되어 있음 (기록용):
+--   ALTER TABLE `t_schedule` MODIFY `tid` int NULL;                 -- 티처 일정만 tid 사용
+--   ALTER TABLE `t_schedule` ADD COLUMN `uid` int NULL AFTER `tid`; -- 일반 직원 일정 대상 = t_user.id
+-- 입력 규칙 (LMS): 티처 일정 → tid 세팅 / 일반 직원 일정 → tid=NULL, uid=t_user.id / wid = 작성자 t_user.id
+
+-- uid 조회 인덱스 (Staff API가 WHERE uid = ... 로 조회) — 미적용이면 실행
+ALTER TABLE `t_schedule` ADD KEY `idx_uid` (`uid`);

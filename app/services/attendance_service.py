@@ -115,10 +115,10 @@ def _et_date(dt: datetime) -> date:
 
 
 async def _dayoffs_by_date(
-    db: AsyncSession, tid: int | None, from_date: date, to_date: date
+    db: AsyncSession, user: User, from_date: date, to_date: date
 ) -> dict[date, Schedule]:
     """본인 스케줄 중 '근무 아님' 유형을 날짜별로 펼침 (스팬 휴가는 각 날짜에 매핑)"""
-    schedules = await schedule_service.get_schedule(db, tid, from_date, to_date)
+    schedules = await schedule_service.get_schedule(db, user, from_date, to_date)
     by_date: dict[date, Schedule] = {}
     for s in schedules:
         if (s.eventtype or "").strip().lower() not in DAYOFF_EVENT_TYPES:
@@ -148,7 +148,7 @@ async def get_day_info(db: AsyncSession, user: User) -> DayInfo:
     """오늘(ET)의 휴일/휴가 여부 — 홈 화면 안내용"""
     today = datetime.now(APP_TZ).date()
     holidays = await holiday_service.get_holidays(db, user.bid, today, today)
-    dayoff = (await _dayoffs_by_date(db, user.tid, today, today)).get(today)
+    dayoff = (await _dayoffs_by_date(db, user, today, today)).get(today)
     fields = _day_off_fields(dayoff)
     return DayInfo(
         is_holiday=bool(holidays),
@@ -186,7 +186,7 @@ async def get_calendar(db: AsyncSession, user: User, year: int, month: int) -> A
     holidays_by_day = {
         h.sdate: h.holidaynm for h in await holiday_service.get_holidays(db, user.bid, first, last)
     }
-    dayoffs_by_day = await _dayoffs_by_date(db, user.tid, first, last)
+    dayoffs_by_day = await _dayoffs_by_date(db, user, first, last)
 
     days: list[AttendanceDay] = []
     d = first

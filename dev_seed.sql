@@ -58,6 +58,15 @@ INSERT INTO `t_schedule` (`tid`, `wid`, `sdate`, `edate`, `stime`, `etime`, `all
 VALUES (@tid, @wid, '2026-07-31', '2026-07-31', '14:00', '17:00', 'N', 'Doctor Appointment', 'dayoff', NOW());
 
 -- ---------------------------------------------------------------
+-- 3-1) 일반 직원(티처 아님) 휴가 — tid=NULL, uid=t_user.id
+--      SELECT id, loginid FROM t_user WHERE tid IS NULL AND del_yn='N';
+-- ---------------------------------------------------------------
+SET @staff_uid := 2077;  -- ← 테스트할 일반 직원의 t_user.id 로 변경
+
+INSERT INTO `t_schedule` (`tid`, `uid`, `wid`, `sdate`, `edate`, `stime`, `etime`, `allday`, `eventname`, `eventtype`, `ins_date`)
+VALUES (NULL, @staff_uid, @wid, '2026-07-23', '2026-07-24', NULL, NULL, 'Y', 'Personal Leave', 'dayoff', NOW());
+
+-- ---------------------------------------------------------------
 -- 4) t_usertimecheck — 출근 기록 샘플 (선택)
 --    wid 는 t_user.id (tid 아님!). 필요 시 주석 해제 후 id 변경.
 --    시간은 UTC 저장 — 아래는 ET 09:00/18:00 (EDT = UTC-4)

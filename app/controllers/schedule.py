@@ -31,5 +31,5 @@ async def get_schedule(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    schedules = await schedule_service.get_schedule(db, current_user.tid, from_date, to_date)
+    schedules = await schedule_service.get_schedule(db, current_user, from_date, to_date)
     return [ScheduleOut.model_validate(s) for s in schedules]

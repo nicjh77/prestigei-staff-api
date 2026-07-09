@@ -9,8 +9,9 @@ _TIME = dict(pattern=r"^\d{2}:\d{2}$", max_length=5)
 
 class ScheduleOut(BaseModel):
     schid: int
-    tid: int
-    wid: int | None
+    tid: int | None
+    uid: int | None       # 일반 직원 일정 대상 (t_user.id)
+    wid: int | None       # 작성자 (대상 아님)
     sdate: date | None
     edate: date | None
     stime: str | None
