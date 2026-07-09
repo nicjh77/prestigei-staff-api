@@ -87,3 +87,28 @@ CREATE TABLE `t_notification_log` (
   PRIMARY KEY (`id`),
   KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- =============================================
+-- 2026-07-09  t_datelist 지점별 휴일 지원 (bid 컬럼 추가)
+-- =============================================
+-- bid: JSON 배열 문자열 — t_invoiceitem.bid 와 동일 형식 (예: '["6","7","4","8","2"]', 값은 t_branch.bid 문자열)
+--   NULL       = 전 지점 공통 (국가 공휴일 등)
+--   '["4"]' 등 = 해당 지점들만의 휴일 (지점 창립일 등)
+-- 컬럼 charset 은 t_datelist 기존 컬럼과 동일하게 utf8mb3 유지
+
+ALTER TABLE `t_datelist`
+  ADD COLUMN `bid` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_unicode_ci DEFAULT NULL AFTER `holidaynm`;
+
+-- ⚠️ LMS 주입 시 주의: 2014-01-01 ~ 2030-12-31 전 날짜 행이 이미 존재하므로 (PK = sdate)
+-- INSERT IGNORE 는 기존 날짜에 대해 아무것도 갱신하지 않음 (조용히 skip).
+-- 기존 날짜의 휴일 지정/변경은 ON DUPLICATE KEY UPDATE 사용:
+--
+-- INSERT INTO `t_datelist` (`sdate`, `weekday`, `holidayyn`, `holidaynm`, `bid`) VALUES
+--     ('2026-07-04', 'SATURDAY', 'Y', 'Independence Day', NULL),
+--     ('2026-09-15', 'TUESDAY',  'Y', 'WC Founding Day', '["2"]')
+-- ON DUPLICATE KEY UPDATE
+--     `weekday` = VALUES(`weekday`),
+--     `holidayyn` = VALUES(`holidayyn`),
+--     `holidaynm` = VALUES(`holidaynm`),
+--     `bid` = VALUES(`bid`);
