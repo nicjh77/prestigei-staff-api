@@ -146,7 +146,13 @@ Alembic is not used — models are written to match existing DB tables directly.
 
 The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABASE_URL` property in `config.py` auto-converts `DATABASE_URL` from pymysql → aiomysql.
 
-`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.wid` is the employee number used in some other tables. `t_user.bid` is the branch/location ID. Note: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author). Since the Staff API no longer writes notices (the LMS writes them directly to the DB), the LMS must set `wid = t_user.id` for "noticed by" to resolve correctly.
+`t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.bid` is the branch/location ID. Note: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author). Since the Staff API no longer writes notices (the LMS writes them directly to the DB), the LMS must set `wid = t_user.id` for "noticed by" to resolve correctly.
+
+**`wid` naming trap:** `wid` means different things per table. `t_usertimecheck.wid` = `t_user.id` (subject). `t_noticeboard.wid` = `t_user.id` (author). `t_schedule.wid` = **writer** `t_user.id` (who entered the row — NOT the schedule's subject; the subject is `tid` → `t_teacher.tid`, linked from `t_user.tid`). `t_user.wid` itself appears to be the creator's `t_user.id` (registrar), not an employee number — many accounts share the same value.
+
+**Schedule (`t_schedule`):** the subject is `tid` (`t_teacher.tid`); users link via `t_user.tid` (nullable — staff without a teacher row have no schedules; `schedule_service` short-circuits `tid=None` to `[]`). Events can span dates (`sdate`~`edate`, `edate` may be NULL for single-day); range queries must use overlap logic (`sdate <= to AND COALESCE(edate, sdate) >= from`), not `sdate BETWEEN`. `eventtype` values seen: `class`, `tutor`, `dayoff`, `other`. Dayoffs can be partial-day (`stime`/`etime` set, `allday='N'`).
+
+**Holidays (`t_datelist`):** date-dimension table, one row per calendar date (PK `sdate`, range 2014–2030), columns `weekday`, `holidayyn` CHAR(1), `holidaynm`. **Global only — no branch column**; branch-specific holidays have no storage yet. Holiday flags are maintained per-year by the LMS (US federal holidays); verify the current year is populated before relying on it.
 
 **Soft deletes:** legacy tables use a `del_yn` / `delyn` CHAR(1) column (`'N'` = active, `'Y'` = deleted). Services must filter `del_yn = 'N'` on reads. Newer tables (e.g. `t_weekly_vision`) use `is_hidden` instead.
 
