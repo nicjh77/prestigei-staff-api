@@ -122,5 +122,5 @@ ALTER TABLE `t_datelist`
 --   ALTER TABLE `t_schedule` ADD COLUMN `uid` int NULL AFTER `tid`; -- 일반 직원 일정 대상 = t_user.id
 -- 입력 규칙 (LMS): 티처 일정 → tid 세팅 / 일반 직원 일정 → tid=NULL, uid=t_user.id / wid = 작성자 t_user.id
 
--- uid 조회 인덱스 (Staff API가 WHERE uid = ... 로 조회) — 미적용이면 실행
-ALTER TABLE `t_schedule` ADD KEY `idx_uid` (`uid`);
+-- uid 조회 인덱스 (Staff API가 WHERE uid = ... 로 조회) — 프로덕션에 이미 존재 확인됨 (2026-07-09, 기록용)
+--   ALTER TABLE `t_schedule` ADD KEY `idx_uid` (`uid`);
