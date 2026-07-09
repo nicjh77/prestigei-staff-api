@@ -74,6 +74,13 @@ async def process_scan(db: AsyncSession, data: ScanRequest) -> AttendanceRecord:
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid QR format")
 
+    # 존재하지 않거나 퇴사(soft-delete)한 id로 정크 출퇴근 행이 삽입되지 않도록 검증
+    # (manual 경로와 동일한 활성 사용자 확인 — 무인증 엔드포인트라 최소한의 무결성 방어)
+    result = await db.execute(select(User).where(User.id == wid))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
     now = datetime.now(timezone.utc)
     record = await _get_today_record(db, wid)
     record = _record_check(db, record, wid, data.ip, data.device, now)

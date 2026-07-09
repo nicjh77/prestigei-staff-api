@@ -61,10 +61,12 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 **Role permissions:**
 | Action | staff | manager | admin |
 |--|:--:|:--:|:--:|
-| View notices / announcements / schedule / bulletin / weekly vision | O | O | O |
+| View notices / announcements / schedule / weekly vision | O | O | O |
 | Send push notifications | X | X | O (or LMS API Key) |
 
-**This API is read-only for content.** Schedules, announcements, bulletin/notice posts, and weekly vision are created/edited/deleted **directly in the DB by the LMS** — the Staff API's write routes (`POST/PUT/DELETE` on `/schedule`, `/announcements`, `/bulletin`) were **removed**; only `GET` remains. The one content-mutating endpoint is `POST /notifications/send` (admin JWT or LMS `X-API-Key`). Per-user self-service writes remain: `PATCH /users/me` (profile) and `POST /users/me/password`.
+**This API is read-only for content.** Schedules, announcements, notice posts, and weekly vision are created/edited/deleted **directly in the DB by the LMS** — the Staff API's write routes (`POST/PUT/DELETE` on `/schedule`, `/announcements`, `/bulletin`) were **removed**; only `GET` remains. The one content-mutating endpoint is `POST /notifications/send` (admin JWT or LMS `X-API-Key`). Per-user self-service writes remain: `PATCH /users/me` (profile) and `POST /users/me/password`.
+
+**The `/bulletin` read endpoints were also removed (2026-07, security):** they read the **same `t_noticeboard` table** as `/notices` but applied **no branch (`bid`) filter**, so any staff user could read another branch's notices via `GET /bulletin/{id}` — a cross-branch IDOR that bypassed the exact protection `/notices` adds. `/notices` (branch-scoped, IDOR-safe) fully replaces it and the app only ever used `/notices`. The `BulletinPost` model (`app/models/bulletin.py`) is **kept** — `notice_service` maps it to `t_noticeboard`; only the bulletin controller/service/schema and its router registration were deleted.
 
 Announcement `target_role` visibility: staff sees `all/staff`, manager/admin see `all/staff/manager` (`announcement_service._VISIBLE_ROLES`). This visibility (plus the publish/expire window) is enforced on **both** the list and the single `GET /announcements/{id}` fetch, so a lower role can't read a higher-targeted (or unpublished/expired) announcement by iterating ids.
 
