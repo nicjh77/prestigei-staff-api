@@ -11,6 +11,7 @@ from app.core.dependencies import get_current_user
 from app.core.rate_limit import SCAN_LIMIT, SCAN_WINDOW, rate_limit
 from app.models.user import User
 from app.schemas.attendance import (
+    AttendanceCalendarResponse,
     AttendanceRecordOut,
     ManualScanRequest,
     QRStatusResponse,
@@ -66,9 +67,24 @@ async def today(
     db: AsyncSession = Depends(get_db),
 ):
     record = await attendance_service.get_today(db, current_user.id)
-    if record is None:
-        return TodayAttendance(checkin=None, checkout=None)
-    return TodayAttendance(checkin=record.checkin, checkout=record.checkout)
+    day_info = await attendance_service.get_day_info(db, current_user)
+    return TodayAttendance(
+        checkin=record.checkin if record else None,
+        checkout=record.checkout if record else None,
+        day_info=day_info,
+    )
+
+
+@router.get("/calendar", response_model=AttendanceCalendarResponse)
+async def calendar_view(
+    year: int | None = Query(default=None, ge=2014, le=2100),
+    month: int | None = Query(default=None, ge=1, le=12),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """월 단위 출퇴근 캘린더 — 일자별 출근/휴일/휴가 상태 + 요약 (기본: 이번 달, ET)"""
+    now = datetime.now(APP_TZ)
+    return await attendance_service.get_calendar(db, current_user, year or now.year, month or now.month)
 
 
 @router.get("/history", response_model=PaginatedResponse[AttendanceRecordOut])

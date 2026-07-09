@@ -134,6 +134,18 @@ Read-only "Notice" feature over `t_noticeboard` — the **same table** the "bull
 - `wid` stores **`t_user.id`** (author), despite the name — "noticed by" is that user's `loginid`. Writes are owned by the LMS (see below), which must set `wid = t_user.id` for the author to resolve.
 - `title`/`details` may be HTML with inline links and large base64 images — the app renders `details` via `RenderHtml` (safe link/tag props). Some rows are multi-MB.
 
+## Holidays & Attendance Calendar
+
+Read-only holiday feed over `t_datelist` + holiday/dayoff-aware attendance views. Code: `app/models/datelist.py`, `app/services/holiday_service.py`, `app/controllers/holidays.py`, calendar/day-info logic in `attendance_service`.
+
+- `GET /api/v1/holidays?from_date&to_date` (auth: `get_current_user`) — holidays visible to the caller: `bid IS NULL` (all branches) **or** `bid LIKE '%"<user.bid>"%'`. Defaults to the current month (ET).
+- `GET /api/v1/attendance/calendar?year&month` — every day of the month with merged status: `worked` (attendance record exists — holiday name still included alongside, "휴일 근무") → `holiday` → `dayoff` → `none`, plus a `summary` (worked/holiday/dayoff day counts). Defaults to the current month (ET).
+- `GET /api/v1/attendance/today` — now also returns `day_info` (`is_holiday`, `holiday_name`, `is_day_off`, all-day vs partial + `stime`/`etime`) — additive, old clients unaffected.
+- Dayoffs come from the user's own `t_schedule` (via `t_user.tid`) where `eventtype ∈ DAYOFF_EVENT_TYPES` (`app/core/constants.py`, currently `{"dayoff"}` — extend as the LMS confirms more non-working types). Multi-day spans are expanded per-day; partial dayoffs (`allday='N'` with `stime`/`etime`) are flagged as non-all-day.
+- Holidays never block scans (`/scan`, `/manual`) — holiday work is recorded normally and shown as worked + holiday name.
+- Weekends are **not** hardcoded as off — branches have different working days; only `t_datelist`/`t_schedule` decide.
+- `dev_seed.sql` (repo root) has local-only sample data: 2026 federal holidays, branch-holiday examples, dayoff schedules. Never run it in production.
+
 ## Rate Limiting
 
 App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login/refresh (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
@@ -166,3 +178,4 @@ No test suite exists yet. `tests/` contains only `__init__.py`.
 
 `app/core/constants.py` holds app-wide constants. Currently:
 - `APP_TZ` — `ZoneInfo("America/New_York")` (Eastern Time, covers NY and GA locations)
+- `DAYOFF_EVENT_TYPES` — `t_schedule.eventtype` values treated as "not working" for attendance views (currently `{"dayoff"}`)
