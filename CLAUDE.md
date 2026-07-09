@@ -32,6 +32,20 @@ Required env vars: `DATABASE_URL`, `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPI
 
 Optional env vars: `LMS_API_KEY` — shared secret for LMS → Staff API notification calls. Defaults to empty (API key auth disabled). The env var `LMS_API_KEY` (server side) and the request header `X-API-Key` (caller side) are the same secret under two names: `require_admin_or_api_key` compares the incoming `X-API-Key` header against `settings.LMS_API_KEY` via `secrets.compare_digest`. Behavior in `app/core/dependencies.py`: if the request sends an `X-API-Key` header but `LMS_API_KEY` is empty → `500 "LMS_API_KEY not configured"`; if it doesn't match → `403`. When testing `/notifications/send` as an admin, send only the `Bearer` JWT and **omit** the `X-API-Key` header (sending it forces the API-key path).
 
+**`SECRET_KEY` must be ≥32 chars and not a placeholder** — `config.py` has a `field_validator` that refuses to boot on a short/placeholder key (a weak HS256 signing key makes access tokens forgeable). `.env.example` ships an intentionally-invalid short placeholder; real env files must override it.
+
+## Security posture (audited 2026-07-09 — read before "fixing" these)
+
+This codebase was security-audited twice (2026-07-06, 2026-07-09). The items below are **known and intentional** — do not re-report or "harden" them without a product decision, or you'll re-break working behavior:
+
+- **Unauthenticated `/attendance/scan` + `/manual`** — intentional (external scanner/kiosk can't hold a JWT). Buddy-punching is an accepted trade-off. See the Attendance QR Flow section. Mitigations in place: per-IP rate limit + active-user validation.
+- **App biometric login stores the plaintext password in SecureStore** — **accepted by the product owner** (2026-07-09). The password is only ever the plaintext credential the user types anyway; biometric is a convenience auto-fill, not a second factor. `requireAuthentication: true` is intentionally NOT used (breaks many Android face-unlock / Class 1-2 sensors — see app CLAUDE.md). Do not re-flag.
+- **No rate limit on authenticated GET endpoints** — intentional. They require a valid JWT and return only the caller's own branch/user-scoped data, and the home screen fires several in parallel + polls QR every 2s; a limiter there would break normal use. Rate limiting is applied only where it matters: login/refresh (brute force) and the unauthenticated scan (flooding).
+- **No TLS certificate pinning in the app** — accepted. Transport is HTTPS; pinning adds rotation/outage risk disproportionate to this app's threat model.
+- **Git history secret leak (1st audit)** — resolved 2026-07-09: history fully purged (repo re-init, remote deleted + recreated), credentials rotated by the owner.
+
+Genuine bugs found in the audits WERE fixed (see git log): cross-branch IDOR via `/bulletin` (endpoints removed), announcement get-by-id IDOR, XFF rate-limit bypass, production `/docs` exposure, `SECRET_KEY` strength gate, scan junk-row injection, several notification-dispatch reliability issues. If a NEW finding appears that isn't in this list or the git log, it's worth acting on.
+
 ## Architecture
 
 **Layer structure:**
@@ -76,8 +90,10 @@ The employee app generates the QR client-side; an external scanner reads it. The
 
 1. Frontend: constructs a static token `e{user.id}` (not a JWT) from the authenticated user's ID and renders it as a QR image client-side
 2. Frontend: polls `GET /api/v1/attendance/qr/status` (auth required via Bearer token) every ~2s to check scan status
-3. Scanner: `POST /api/v1/attendance/scan` `{ token, ip, device }` — parses `e{user.id}` format, auto-determines checkin/checkout, records attendance; no auth required
+3. Scanner: `POST /api/v1/attendance/scan` `{ token, ip, device }` — parses `e{user.id}` format, auto-determines checkin/checkout, records attendance; no auth required. Both `process_scan` and `process_manual` validate that the parsed id is a **real, active** user (`del_yn='N'`) before inserting — a nonexistent/terminated id gets 404, not a junk row.
 4. Poll response `status`: `pending` → `checked_in` / `checked_out` (stop polling); `expired` is a client-side concept only
+
+**Security note (accepted design):** `/scan` and `/manual` are intentionally **unauthenticated** — an external scanner/kiosk calls them and can't carry a staff JWT. This means the `e{user.id}` token is guessable and `ip`/`device` are client-supplied, so buddy-punching is possible by design; this is a **known, accepted trade-off** (mitigated by the per-IP rate limit `SCAN_LIMIT` 120/60s and the active-user check above). Do NOT "fix" it by adding auth — that breaks the scanner. A real fix would require a scanner-side shared secret/HMAC or Apache source-IP restriction, which is a deployment decision, not an app change.
 
 `QR_CODE_VALIDITY_MINUTES` is defined in config but not currently enforced server-side — expiry is managed by the frontend.
 
