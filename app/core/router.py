@@ -1,5 +1,6 @@
 from app.controllers import (
     announcements,
+    app_info,
     attendance,
     auth,
     daily_log,
@@ -22,4 +23,5 @@ routers = [
     (announcements.router,  "/announcements"),
     (notifications.router,  "/notifications"),
     (weekly_vision.router,  "/weekly-vision"),
+    (app_info.router,       "/app"),
 ]
