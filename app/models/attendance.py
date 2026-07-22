@@ -7,11 +7,11 @@ from app.models.base import Base
 
 
 class AttendanceRecord(Base):
-    """t_usertimecheck — 하루 1행, wid로 t_user 연결"""
+    """t_usertimecheck — 하루 여러 행 허용(행 = in/out 쌍 1개, 2026-07-22 LMS 정합)"""
     __tablename__ = "t_usertimecheck"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    wid: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # t_user.wid
+    wid: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # 컬럼명과 달리 t_user.id (PK) — t_user.wid 아님
     checkin: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     checkout: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)

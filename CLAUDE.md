@@ -26,7 +26,7 @@ APP_ENV=production uvicorn main:app
 
 `Settings` in `app/core/config.py` has no Python defaults (except `LMS_API_KEY = ""`) — all other values must come from the env file. When adding a new setting, add it to every env file in use.
 
-Required env vars: `DATABASE_URL`, `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `QR_CODE_VALIDITY_MINUTES`.
+Required env vars: `DATABASE_URL`, `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES` (2026-07-22부터 4320 = 3일; 리프레시 토큰 제거로 액세스 토큰만 사용).
 
 **DATABASE_URL must include `?charset=utf8mb4`** to prevent Korean/CJK text corruption (e.g. `mysql+pymysql://...?charset=utf8mb4`).
 
@@ -40,7 +40,7 @@ This codebase was security-audited twice (2026-07-06, 2026-07-09). The items bel
 
 - **Unauthenticated `/attendance/scan` + `/manual`** — intentional (external scanner/kiosk can't hold a JWT). Buddy-punching is an accepted trade-off. See the Attendance QR Flow section. Mitigations in place: per-IP rate limit + active-user validation.
 - **App biometric login stores the plaintext password in SecureStore** — **accepted by the product owner** (2026-07-09). The password is only ever the plaintext credential the user types anyway; biometric is a convenience auto-fill, not a second factor. `requireAuthentication: true` is intentionally NOT used (breaks many Android face-unlock / Class 1-2 sensors — see app CLAUDE.md). Do not re-flag.
-- **No rate limit on authenticated GET endpoints** — intentional. They require a valid JWT and return only the caller's own branch/user-scoped data, and the home screen fires several in parallel + polls QR every 2s; a limiter there would break normal use. Rate limiting is applied only where it matters: login/refresh (brute force) and the unauthenticated scan (flooding).
+- **No rate limit on authenticated GET endpoints** — intentional. They require a valid JWT and return only the caller's own branch/user-scoped data, and the home screen fires several in parallel; a limiter there would break normal use. Rate limiting is applied only where it matters: login (brute force) and the unauthenticated scan (flooding).
 - **No TLS certificate pinning in the app** — accepted. Transport is HTTPS; pinning adds rotation/outage risk disproportionate to this app's threat model.
 - **Git history secret leak (1st audit)** — resolved 2026-07-09: history fully purged (repo re-init, remote deleted + recreated), credentials rotated by the owner.
 
@@ -67,9 +67,9 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 **DB transaction rules:**
 `get_db` automatically commits on success and rolls back on exception. Services never call `db.commit()` directly. Use `await db.flush()` only when you need DB-generated values (e.g. `id`) immediately after an insert.
 
-**Auth flow:**
-- `Bearer` JWT access token (short-lived, `ACCESS_TOKEN_EXPIRE_MINUTES`)
-- Opaque refresh token — only the SHA-256 hash is stored in DB; the raw token is returned to the client
+**Auth flow (2026-07-22 리프레시 토큰 제거):**
+- `Bearer` JWT access token only — `ACCESS_TOKEN_EXPIRE_MINUTES=4320` (3일). `/auth/login`이 유일한 auth 엔드포인트.
+- Refresh token은 **제거됨** (`/auth/refresh`·`/auth/logout`·`/auth/logout-all` 삭제, `t_refresh_tokens` 테이블 드롭 대상 — changelog.sql 참조). 앱은 토큰 만료 시 재로그인(바이오메트릭 자동 입력)한다. **Accepted trade-off:** 3일 토큰은 서버측 폐기 수단이 없음(로그아웃 = 클라이언트 로컬 삭제). 단 `get_current_user`가 요청마다 `del_yn='N'`을 확인하므로 퇴사 처리된 계정의 토큰은 즉시 무효화된다.
 - Inject `get_current_user` / `require_manager` / `require_admin` from `app/core/dependencies.py` via `Depends`
 
 **Role permissions:**
@@ -84,22 +84,20 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 
 Announcement `target_role` visibility: staff sees `all/staff`, manager/admin see `all/staff/manager` (`announcement_service._VISIBLE_ROLES`). This visibility (plus the publish/expire window) is enforced on **both** the list and the single `GET /announcements/{id}` fetch, so a lower role can't read a higher-targeted (or unpublished/expired) announcement by iterating ids.
 
-## Attendance QR Flow
+## Attendance QR Flow (2026-07-22 단순화 — 폴링 제거, 하루 다중 기록)
 
-The employee app generates the QR client-side; an external scanner reads it. The server auto-determines checkin vs checkout based on today's existing record.
+The employee app generates the QR client-side; an external scanner reads it. The server auto-determines checkin vs checkout based on today's latest record.
 
-1. Frontend: constructs a static token `e{user.id}` (not a JWT) from the authenticated user's ID and renders it as a QR image client-side
-2. Frontend: polls `GET /api/v1/attendance/qr/status` (auth required via Bearer token) every ~2s to check scan status
-3. Scanner: `POST /api/v1/attendance/scan` `{ token, ip, device }` — parses `e{user.id}` format, auto-determines checkin/checkout, records attendance; no auth required. Both `process_scan` and `process_manual` validate that the parsed id is a **real, active** user (`del_yn='N'`) before inserting — a nonexistent/terminated id gets 404, not a junk row.
-4. Poll response `status` is the **absolute state of today's record** (`pending` = no record, `checked_in` = checkin only, `checked_out` = both) — NOT a "was this QR just scanned" event. Clients must capture the status at QR-activation time as a baseline and treat only a **change** from that baseline as scan completion. The app originally treated any non-`pending` response as "just scanned", so anyone already checked in saw their checkout QR vanish on the first poll (~2s) — fixed app-side 2026-07-14 (`QrCheckinCard.tsx` baseline logic; also blocks QR generation with an "All Done for Today" notice when both are recorded). No server change was needed; keep this contract in mind if the status endpoint is ever redesigned. `expired` is a client-side concept only.
+1. Frontend: constructs a static token `e{user.id}` (not a JWT) from the authenticated user's ID and renders it as a QR image client-side. **폴링 없음** — 앱은 QR을 표시만 하고(탭 → QR + "Scan at the terminal" + Close) 스캔 결과를 서버에 묻지 않는다. `GET /attendance/qr/status`는 **제거됨** (구 폴링 계약·baseline 로직·2분 만료는 모두 폐기).
+2. Scanner: `POST /api/v1/attendance/scan` `{ token, ip, device }` — parses `e{user.id}` format, auto-determines checkin/checkout, records attendance; no auth required. Both `process_scan` and `process_manual` validate that the parsed id is a **real, active** user (`del_yn='N'`) before inserting — a nonexistent/terminated id gets 404, not a junk row.
+3. **`t_usertimecheck`는 하루 여러 행 허용** (LMS와 동일, 2026-07-22 변경): 오늘의 최신 행에 checkout이 없으면 그 행에 checkout, 아니면(첫 스캔이거나 모두 완료) 새 행에 checkin. 구 "하루 1행 + 3번째 스캔 409" 로직은 제거됨. 연속 스캔으로 0분짜리 in/out 행이 생길 수 있으나 의도적으로 허용(가드 없음 — LMS에서 수정 가능). 최신 행 판정은 `checkin DESC, id DESC` (DATETIME 초 단위 타이브레이크).
+4. `GET /attendance/today`와 `GET /attendance/calendar`의 각 날짜는 `records` 배열(checkin 오름차순, `{id, checkin, checkout}`)로 하루 전체 in/out 쌍을 반환한다. 기존 단일 `checkin`(첫 출근)/`checkout`(마지막 행의 퇴근, 미완료면 null) 필드는 구버전 앱 호환용으로 유지. 시간 합산은 하지 않는다.
 
 **Security note (accepted design):** `/scan` and `/manual` are intentionally **unauthenticated** — an external scanner/kiosk calls them and can't carry a staff JWT. This means the `e{user.id}` token is guessable and `ip`/`device` are client-supplied, so buddy-punching is possible by design; this is a **known, accepted trade-off** (mitigated by the per-IP rate limit `SCAN_LIMIT` 120/60s and the active-user check above). Do NOT "fix" it by adding auth — that breaks the scanner. A real fix would require a scanner-side shared secret/HMAC or Apache source-IP restriction, which is a deployment decision, not an app change.
 
-`QR_CODE_VALIDITY_MINUTES` is defined in config but not currently enforced server-side — expiry is managed by the frontend.
-
 Kiosk alternative: `POST /api/v1/attendance/manual` `{ wid, ip, device }` — bypasses QR, uses `t_user.id` directly. Same checkin/checkout logic applies.
 
-`t_usertimecheck` is **one row per day** (checkin and checkout on the same row). Server logic: no record today → checkin; checkin but no checkout → checkout; both exist → 409 error.
+`t_usertimecheck` allows **multiple rows per day** (2026-07-22, LMS와 동일) — each row is one in/out pair. Server logic: latest today row has no checkout → set checkout on it; otherwise → new row with checkin. No 409.
 
 "Today" is determined using Eastern Time (`APP_TZ` in `app/core/constants.py`). All `today_start` calculations use ET midnight converted to UTC before querying the DB.
 
@@ -166,7 +164,7 @@ Read-only holiday feed over `t_datelist` + holiday/dayoff-aware attendance views
 
 ## Rate Limiting
 
-App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login/refresh (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
+App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
 
 **Deployment note:** the API runs behind **Apache2** (`mod_proxy_http`) on Ubuntu (managed by systemd). Apache appends the real client IP to the **end** of `X-Forwarded-For`, so `_client_ip()` reads the **rightmost** value. Using the first value would let a client spoof `X-Forwarded-For` to get a fresh bucket per request and bypass every limit.
 
@@ -178,7 +176,7 @@ The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABA
 
 `t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.bid` is the branch/location ID. Note: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author). Since the Staff API no longer writes notices (the LMS writes them directly to the DB), the LMS must set `wid = t_user.id` for "noticed by" to resolve correctly.
 
-**`wid` naming trap:** `wid` means different things per table. `t_usertimecheck.wid` = `t_user.id` (subject). `t_noticeboard.wid` = `t_user.id` (author). `t_schedule.wid` = **writer** `t_user.id` (who entered the row — NOT the schedule's subject; the subject is `tid` for teachers or `uid` for staff). `t_user.wid` itself appears to be the creator's `t_user.id` (registrar), not an employee number — many accounts share the same value.
+**`wid` naming trap:** `wid` means different things per table. `t_usertimecheck.wid` = `t_user.id` (subject). `t_noticeboard.wid` = `t_user.id` (author). `t_schedule.wid` = **writer** `t_user.id` (who entered the row — NOT the schedule's subject; the subject is `tid` for teachers or `uid` for staff). `t_user.wid` is the **registrar's** `t_user.id` (who registered the account — confirmed by the owner 2026-07-22), not an employee number — many accounts share the same value. It plays no role in attendance/QR.
 
 **Schedule (`t_schedule`):** two subject keys (2026-07 schema change: `tid` became nullable, `uid` added). Teacher schedules use `tid` (`t_teacher.tid`, linked from `t_user.tid`); non-teacher staff schedules use `uid` (= `t_user.id`) with `tid=NULL`. `schedule_service` matches `uid = user.id OR tid = user.tid` (tid clause skipped when the user has no tid). LMS write rule: teacher event → set `tid`; staff event → `tid=NULL, uid=t_user.id`; `wid` = writer in both cases. Events can span dates (`sdate`~`edate`, `edate` may be NULL for single-day); range queries must use overlap logic (`sdate <= to AND COALESCE(edate, sdate) >= from`), not `sdate BETWEEN`. `eventtype` values seen: `class`, `tutor`, `dayoff`, `other`. Dayoffs can be partial-day (`stime`/`etime` set, `allday='N'`).
 

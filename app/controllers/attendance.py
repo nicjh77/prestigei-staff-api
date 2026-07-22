@@ -12,9 +12,9 @@ from app.core.rate_limit import SCAN_LIMIT, SCAN_WINDOW, rate_limit
 from app.models.user import User
 from app.schemas.attendance import (
     AttendanceCalendarResponse,
+    AttendancePair,
     AttendanceRecordOut,
     ManualScanRequest,
-    QRStatusResponse,
     ScanRequest,
     TodayAttendance,
 )
@@ -22,15 +22,6 @@ from app.schemas.common import PaginatedResponse
 from app.services import attendance_service
 
 router = APIRouter(tags=["Attendance"])
-
-
-@router.get("/qr/status", response_model=QRStatusResponse)
-async def get_qr_status(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """앱이 폴링으로 스캔 완료 여부 확인 — 토큰 없이 인증된 직원 ID로 조회"""
-    return await attendance_service.get_qr_status(db, current_user.id)
 
 
 @router.post(
@@ -66,11 +57,12 @@ async def today(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    record = await attendance_service.get_today(db, current_user.id)
+    records = await attendance_service.get_today_records(db, current_user.id)
     day_info = await attendance_service.get_day_info(db, current_user)
     return TodayAttendance(
-        checkin=record.checkin if record else None,
-        checkout=record.checkout if record else None,
+        checkin=records[0].checkin if records else None,       # 첫 출근 (구버전 호환)
+        checkout=records[-1].checkout if records else None,    # 마지막 행 퇴근 (미완료면 null)
+        records=[AttendancePair.model_validate(r) for r in records],
         day_info=day_info,
     )
 

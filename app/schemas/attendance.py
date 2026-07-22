@@ -35,17 +35,28 @@ class DayInfo(BaseModel):
     day_off_name: str | None          # eventname
 
 
+# 하루 안의 개별 in/out 쌍 (하루 여러 행 허용 — LMS와 동일)
+class AttendancePair(BaseModel):
+    id: int
+    checkin: datetime
+    checkout: datetime | None         # 미완료(퇴근 전)면 null
+
+    model_config = {"from_attributes": True}
+
+
 class TodayAttendance(BaseModel):
-    checkin: datetime | None
-    checkout: datetime | None
+    checkin: datetime | None          # 첫 출근 (구버전 앱 호환)
+    checkout: datetime | None         # 마지막 행의 퇴근 (미완료면 null)
+    records: list[AttendancePair] = []  # 오늘 전체 기록, checkin 오름차순
     day_info: DayInfo | None = None   # additive — 기존 클라이언트는 무시
 
 
 class AttendanceDay(BaseModel):
     date: date_type
     status: Literal["worked", "holiday", "dayoff", "none"]
-    checkin: datetime | None
-    checkout: datetime | None
+    checkin: datetime | None          # 첫 출근 (구버전 앱 호환)
+    checkout: datetime | None         # 마지막 행의 퇴근
+    records: list[AttendancePair] = []  # 해당 일 전체 기록, checkin 오름차순
     holiday_name: str | None          # 휴일이면 이름 (worked여도 병기 — "휴일 근무")
     day_off: bool
     day_off_all_day: bool | None
@@ -65,10 +76,6 @@ class AttendanceCalendarResponse(BaseModel):
     month: int
     days: list[AttendanceDay]         # 해당 월 전체 날짜 (1일~말일)
     summary: CalendarSummary
-
-
-class QRStatusResponse(BaseModel):
-    status: Literal["pending", "checked_in", "checked_out"]
 
 
 # 키오스크 이름 검색 → 직원 선택 시 호출

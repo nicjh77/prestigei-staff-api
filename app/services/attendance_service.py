@@ -12,18 +12,18 @@ from app.models.user import User
 from app.schemas.attendance import (
     AttendanceCalendarResponse,
     AttendanceDay,
+    AttendancePair,
     CalendarSummary,
     DayInfo,
     ManualScanRequest,
-    QRStatusResponse,
     ScanRequest,
 )
 from app.services import holiday_service, schedule_service
 from app.services._common import today_start_utc
 
 
-async def _get_today_record(db: AsyncSession, wid: int) -> AttendanceRecord | None:
-    """오늘(ET 기준) 출퇴근 행 조회 — 중복 행이 있어도 최신 1건으로 안전하게 처리"""
+async def _get_latest_today_record(db: AsyncSession, wid: int) -> AttendanceRecord | None:
+    """오늘(ET 기준) 가장 최근 출퇴근 행 조회"""
     result = await db.execute(
         select(AttendanceRecord)
         .where(
@@ -32,10 +32,26 @@ async def _get_today_record(db: AsyncSession, wid: int) -> AttendanceRecord | No
                 AttendanceRecord.checkin >= today_start_utc(),
             )
         )
-        .order_by(AttendanceRecord.checkin.desc())
+        # checkin이 같은 초로 저장돼도(DATETIME 초 단위) 최신 행이 결정적이도록 id 보조 정렬
+        .order_by(AttendanceRecord.checkin.desc(), AttendanceRecord.id.desc())
         .limit(1)
     )
     return result.scalars().first()
+
+
+async def _get_today_records(db: AsyncSession, wid: int) -> list[AttendanceRecord]:
+    """오늘(ET 기준) 전체 출퇴근 행 — checkin 오름차순 (하루 여러 in/out 쌍 허용)"""
+    result = await db.execute(
+        select(AttendanceRecord)
+        .where(
+            and_(
+                AttendanceRecord.wid == wid,
+                AttendanceRecord.checkin >= today_start_utc(),
+            )
+        )
+        .order_by(AttendanceRecord.checkin.asc(), AttendanceRecord.id.asc())
+    )
+    return list(result.scalars().all())
 
 
 def _record_check(
@@ -46,8 +62,15 @@ def _record_check(
     device: str | None,
     now: datetime,
 ) -> AttendanceRecord:
-    """오늘 기록 유무에 따라 체크인/체크아웃 결정 (없음→체크인, 체크인만→체크아웃, 둘 다→409)"""
-    if record is None:
+    """최근 행 상태에 따라 체크인/체크아웃 결정 — 하루 여러 in/out 쌍 허용 (LMS와 동일).
+
+    미완료(checkout 없는) 행이 있으면 그 행에 체크아웃, 아니면 새 행에 체크인.
+    """
+    if record is not None and record.checkout is None:
+        record.checkout = now
+        record.checkoutip = ip
+        record.checkoutbrowser = device
+    else:
         record = AttendanceRecord(
             wid=wid,
             checkin=now,
@@ -55,12 +78,6 @@ def _record_check(
             checkinbrowser=device,
         )
         db.add(record)
-    elif record.checkout is None:
-        record.checkout = now
-        record.checkoutip = ip
-        record.checkoutbrowser = device
-    else:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already checked in and out today")
     return record
 
 
@@ -82,7 +99,7 @@ async def process_scan(db: AsyncSession, data: ScanRequest) -> AttendanceRecord:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
 
     now = datetime.now(timezone.utc)
-    record = await _get_today_record(db, wid)
+    record = await _get_latest_today_record(db, wid)
     record = _record_check(db, record, wid, data.ip, data.device, now)
     await db.flush()
     return record
@@ -96,24 +113,14 @@ async def process_manual(db: AsyncSession, data: ManualScanRequest) -> Attendanc
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
 
     now = datetime.now(timezone.utc)
-    record = await _get_today_record(db, data.wid)
+    record = await _get_latest_today_record(db, data.wid)
     record = _record_check(db, record, data.wid, data.ip, data.device, now)
     await db.flush()
     return record
 
 
-async def get_today(db: AsyncSession, wid: int) -> AttendanceRecord | None:
-    return await _get_today_record(db, wid)
-
-
-async def get_qr_status(db: AsyncSession, wid: int) -> QRStatusResponse:
-    """인증된 직원의 오늘 출퇴근 상태 반환"""
-    record = await _get_today_record(db, wid)
-    if record is None:
-        return QRStatusResponse(status="pending")
-    if record.checkout is None:
-        return QRStatusResponse(status="checked_in")
-    return QRStatusResponse(status="checked_out")
+async def get_today_records(db: AsyncSession, wid: int) -> list[AttendanceRecord]:
+    return await _get_today_records(db, wid)
 
 
 def _et_date(dt: datetime) -> date:
@@ -184,11 +191,11 @@ async def get_calendar(db: AsyncSession, user: User, year: int, month: int) -> A
             AttendanceRecord.checkin >= start_utc,
             AttendanceRecord.checkin < end_utc,
         )
-        .order_by(AttendanceRecord.checkin.desc())
+        .order_by(AttendanceRecord.checkin.asc(), AttendanceRecord.id.asc())
     )
-    records_by_day: dict[date, AttendanceRecord] = {}
+    records_by_day: dict[date, list[AttendanceRecord]] = {}
     for r in result.scalars():
-        records_by_day.setdefault(_et_date(r.checkin), r)  # 중복 행이 있어도 최신 1건
+        records_by_day.setdefault(_et_date(r.checkin), []).append(r)  # 하루 여러 in/out 쌍
 
     holidays_by_day = {
         h.sdate: h.holidaynm for h in await holiday_service.get_holidays(db, user.bid, first, last)
@@ -198,10 +205,10 @@ async def get_calendar(db: AsyncSession, user: User, year: int, month: int) -> A
     days: list[AttendanceDay] = []
     d = first
     while d <= last:
-        rec = records_by_day.get(d)
+        recs = records_by_day.get(d)
         holiday = d in holidays_by_day
         dayoff = dayoffs_by_day.get(d)
-        if rec is not None:
+        if recs:
             day_status = "worked"          # 휴일/휴가와 겹치면 아래 필드로 병기 ("휴일 근무")
         elif holiday:
             day_status = "holiday"
@@ -212,8 +219,9 @@ async def get_calendar(db: AsyncSession, user: User, year: int, month: int) -> A
         days.append(AttendanceDay(
             date=d,
             status=day_status,
-            checkin=rec.checkin if rec else None,
-            checkout=rec.checkout if rec else None,
+            checkin=recs[0].checkin if recs else None,      # 첫 출근 (구버전 호환)
+            checkout=recs[-1].checkout if recs else None,   # 마지막 행 퇴근 (미완료면 null)
+            records=[AttendancePair.model_validate(r) for r in (recs or [])],
             holiday_name=holidays_by_day.get(d),
             **_day_off_fields(dayoff),
         ))

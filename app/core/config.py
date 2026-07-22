@@ -18,10 +18,6 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
-    REFRESH_TOKEN_EXPIRE_DAYS: int
-
-    # QR
-    QR_CODE_VALIDITY_MINUTES: int
 
     # LMS Integration
     LMS_API_KEY: str = ""

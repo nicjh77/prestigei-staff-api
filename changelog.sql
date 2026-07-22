@@ -124,3 +124,20 @@ ALTER TABLE `t_datelist`
 
 -- uid 조회 인덱스 (Staff API가 WHERE uid = ... 로 조회) — 프로덕션에 이미 존재 확인됨 (2026-07-09, 기록용)
 --   ALTER TABLE `t_schedule` ADD KEY `idx_uid` (`uid`);
+
+
+-- =============================================
+-- 2026-07-22  리프레시 토큰 제거 (LMS 정합 업데이트)
+-- =============================================
+-- 앱/서버가 리프레시 토큰을 더 이상 사용하지 않음 (액세스 JWT 3일 만료로 대체).
+-- ⚠️ 신규 서버 코드 배포 후 안정 확인이 끝나면 수동 실행 (코드가 참조하지 않으므로 즉시 실행 필수 아님):
+
+-- DROP TABLE `t_refresh_tokens`;
+
+-- 함께 변경된 env 설정 (.env.production에 직접 반영 필요):
+--   ACCESS_TOKEN_EXPIRE_MINUTES=4320   (3일)
+--   REFRESH_TOKEN_EXPIRE_DAYS 삭제
+--   QR_CODE_VALIDITY_MINUTES 삭제 (미사용이었음 — QR 폴링/만료 개념 제거)
+
+-- 참고 (스키마 변경 아님): 같은 배포에서 t_usertimecheck는 "하루 여러 in/out 행" 방식으로
+-- 전환됨 (LMS와 동일). 컬럼 변경 없음 — 서버 로직만 변경 (3번째 스캔 409 → 새 행 체크인).
