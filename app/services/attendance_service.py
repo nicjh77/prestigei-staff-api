@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, func, select
@@ -19,7 +19,7 @@ from app.schemas.attendance import (
     ScanRequest,
 )
 from app.services import holiday_service, schedule_service
-from app.services._common import today_start_utc
+from app.services._common import today_start_et
 
 
 async def _get_latest_today_record(db: AsyncSession, wid: int) -> AttendanceRecord | None:
@@ -29,7 +29,7 @@ async def _get_latest_today_record(db: AsyncSession, wid: int) -> AttendanceReco
         .where(
             and_(
                 AttendanceRecord.wid == wid,
-                AttendanceRecord.checkin >= today_start_utc(),
+                AttendanceRecord.checkin >= today_start_et(),
             )
         )
         # checkin이 같은 초로 저장돼도(DATETIME 초 단위) 최신 행이 결정적이도록 id 보조 정렬
@@ -46,7 +46,7 @@ async def _get_today_records(db: AsyncSession, wid: int) -> list[AttendanceRecor
         .where(
             and_(
                 AttendanceRecord.wid == wid,
-                AttendanceRecord.checkin >= today_start_utc(),
+                AttendanceRecord.checkin >= today_start_et(),
             )
         )
         .order_by(AttendanceRecord.checkin.asc(), AttendanceRecord.id.asc())
@@ -98,7 +98,7 @@ async def process_scan(db: AsyncSession, data: ScanRequest) -> AttendanceRecord:
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(APP_TZ).replace(tzinfo=None)  # ET 벽시계 naive — LMS/터미널과 동일 규약
     record = await _get_latest_today_record(db, wid)
     record = _record_check(db, record, wid, data.ip, data.device, now)
     await db.flush()
@@ -112,7 +112,7 @@ async def process_manual(db: AsyncSession, data: ManualScanRequest) -> Attendanc
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(APP_TZ).replace(tzinfo=None)  # ET 벽시계 naive — LMS/터미널과 동일 규약
     record = await _get_latest_today_record(db, data.wid)
     record = _record_check(db, record, data.wid, data.ip, data.device, now)
     await db.flush()
@@ -124,8 +124,8 @@ async def get_today_records(db: AsyncSession, wid: int) -> list[AttendanceRecord
 
 
 def _et_date(dt: datetime) -> date:
-    """naive UTC(DB 저장값) → ET 날짜"""
-    return dt.replace(tzinfo=timezone.utc).astimezone(APP_TZ).date()
+    """DB 저장값은 ET 벽시계(naive) — 변환 없이 날짜만 취한다"""
+    return dt.date()
 
 
 async def _dayoffs_by_date(
@@ -179,17 +179,17 @@ async def get_calendar(db: AsyncSession, user: User, year: int, month: int) -> A
     """월 캘린더 — 일자별 출근/휴일/휴가 상태 병합"""
     first = date(year, month, 1)
     last = date(year, month, monthrange(year, month)[1])
-    # 월 경계는 ET 자정 기준 → UTC로 변환해 checkin 범위 조회
-    start_utc = datetime(year, month, 1, tzinfo=APP_TZ).astimezone(timezone.utc)
+    # 저장값이 ET 벽시계(naive)이므로 월 경계도 ET naive 자정으로 비교
+    start_et = datetime(year, month, 1)
     next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    end_utc = datetime(next_first.year, next_first.month, 1, tzinfo=APP_TZ).astimezone(timezone.utc)
+    end_et = datetime(next_first.year, next_first.month, 1)
 
     result = await db.execute(
         select(AttendanceRecord)
         .where(
             AttendanceRecord.wid == user.id,
-            AttendanceRecord.checkin >= start_utc,
-            AttendanceRecord.checkin < end_utc,
+            AttendanceRecord.checkin >= start_et,
+            AttendanceRecord.checkin < end_et,
         )
         .order_by(AttendanceRecord.checkin.asc(), AttendanceRecord.id.asc())
     )
@@ -247,6 +247,11 @@ async def get_history(
     page: int,
     size: int,
 ) -> tuple[list[AttendanceRecord], int]:
+    # 저장값이 ET 벽시계(naive)이므로 tz-aware 경계는 ET 벽시계 naive로 정규화
+    if from_date.tzinfo is not None:
+        from_date = from_date.astimezone(APP_TZ).replace(tzinfo=None)
+    if to_date.tzinfo is not None:
+        to_date = to_date.astimezone(APP_TZ).replace(tzinfo=None)
     base_query = select(AttendanceRecord).where(
         AttendanceRecord.wid == wid,
         AttendanceRecord.checkin >= from_date,

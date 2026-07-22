@@ -53,7 +53,10 @@ Accepted/deferred from the 2026-07-23 pre-release audit (also do not re-report):
 - **`GET /daily-log` INNER joins task/category** — orphaned logs silently disappear. Pre-existing pending item (INNER→LEFT), not security.
 - **ET-midnight open-row limitation** — documented in the Attendance QR Flow section (owner confirmed no overnight shifts).
 
-**Datetime serialization contract:** all datetime fields are stored naive-UTC and serialized as offset-less ISO strings (`2026-07-22T15:15:49`, no `Z`). Clients must treat them as UTC — the app converts via `lib/datetime.ts` `serverTime()`. Don't "fix" this server-side without coordinating an app release.
+**Datetime storage contract (2026-07-23 실측 정정 — 테이블마다 다름!):**
+- **`t_usertimecheck` (출퇴근)**: LMS/터미널이 **ET 벽시계 naive**로 저장 (프로덕션 실데이터로 확인 — 아침 출근이 08:0x로 저장됨). staff-api의 `/scan`·`/manual`도 `datetime.now(APP_TZ).replace(tzinfo=None)`로 동일하게 쓰고, 조회 경계(`today_start_et`, 캘린더 월 경계)도 ET naive로 비교한다. **UTC로 "고치지" 말 것** — LMS와 어긋나며 앱 표시도 4시간 깨진다 (한 번 겪음).
+- **`t_notification_*` (staff-api가 쓰는 테이블)**: naive **UTC** 저장 — 앱은 `serverTime()`으로 로컬 변환해 표시.
+- 직렬화는 둘 다 오프셋 없는 ISO 문자열 (`2026-07-22T18:53:18`, no `Z`) — 어느 규약인지는 테이블(쓰는 주체)로 판단.
 
 Genuine bugs found in the audits WERE fixed (see git log): cross-branch IDOR via `/bulletin` (endpoints removed), announcement get-by-id IDOR, XFF rate-limit bypass, production `/docs` exposure, `SECRET_KEY` strength gate, scan junk-row injection, several notification-dispatch reliability issues. If a NEW finding appears that isn't in this list or the git log, it's worth acting on.
 
