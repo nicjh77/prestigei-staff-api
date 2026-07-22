@@ -34,15 +34,26 @@ Optional env vars: `LMS_API_KEY` — shared secret for LMS → Staff API notific
 
 **`SECRET_KEY` must be ≥32 chars and not a placeholder** — `config.py` has a `field_validator` that refuses to boot on a short/placeholder key (a weak HS256 signing key makes access tokens forgeable). `.env.example` ships an intentionally-invalid short placeholder; real env files must override it.
 
-## Security posture (audited 2026-07-09 — read before "fixing" these)
+## Security posture (audited 2026-07-06 / 2026-07-09 / 2026-07-23 — read before "fixing" these)
 
-This codebase was security-audited twice (2026-07-06, 2026-07-09). The items below are **known and intentional** — do not re-report or "harden" them without a product decision, or you'll re-break working behavior:
+This codebase was security-audited three times (2026-07-06, 2026-07-09, and a 2026-07-23 pre-release audit of the v1.2.0 refresh-token-removal release — no injection/IDOR/auth/connection findings). The items below are **known and intentional** — do not re-report or "harden" them without a product decision, or you'll re-break working behavior:
 
 - **Unauthenticated `/attendance/scan` + `/manual`** — intentional (external scanner/kiosk can't hold a JWT). Buddy-punching is an accepted trade-off. See the Attendance QR Flow section. Mitigations in place: per-IP rate limit + active-user validation.
 - **App biometric login stores the plaintext password in SecureStore** — **accepted by the product owner** (2026-07-09). The password is only ever the plaintext credential the user types anyway; biometric is a convenience auto-fill, not a second factor. `requireAuthentication: true` is intentionally NOT used (breaks many Android face-unlock / Class 1-2 sensors — see app CLAUDE.md). Do not re-flag.
 - **No rate limit on authenticated GET endpoints** — intentional. They require a valid JWT and return only the caller's own branch/user-scoped data, and the home screen fires several in parallel; a limiter there would break normal use. Rate limiting is applied only where it matters: login (brute force) and the unauthenticated scan (flooding).
 - **No TLS certificate pinning in the app** — accepted. Transport is HTTPS; pinning adds rotation/outage risk disproportionate to this app's threat model.
 - **Git history secret leak (1st audit)** — resolved 2026-07-09: history fully purged (repo re-init, remote deleted + recreated), credentials rotated by the owner.
+
+Accepted/deferred from the 2026-07-23 pre-release audit (also do not re-report):
+
+- **App-side: 401-driven logout cannot deauthorize its push token** — the interceptor deletes the access token before `logout()` runs, so the `DELETE /notifications/token` call gets 403 and is skipped. Accepted: the token was already invalid, Expo `DeviceNotRegistered` auto-deactivation self-heals, and re-login upserts the same `(user_id, device_id)` row.
+- **Concurrent-scan race can create a duplicate checkin row** — read-then-write with no row lock. Accepted for the single-kiosk deployment; LMS can correct rows.
+- **`python-jose` is unmaintained** — its known CVEs (JWE bomb, asymmetric alg confusion) don't apply to this HS256-pinned symmetric usage. Deferred: migrate to PyJWT at the next convenient window.
+- **`GET /attendance/history` mixes tz-aware ET bounds with naive-UTC storage** (~4-5h window skew) — endpoint is defined but unused by the app. Deferred; convert bounds to UTC (mirror `get_calendar`) if it's ever wired up.
+- **`GET /daily-log` INNER joins task/category** — orphaned logs silently disappear. Pre-existing pending item (INNER→LEFT), not security.
+- **ET-midnight open-row limitation** — documented in the Attendance QR Flow section (owner confirmed no overnight shifts).
+
+**Datetime serialization contract:** all datetime fields are stored naive-UTC and serialized as offset-less ISO strings (`2026-07-22T15:15:49`, no `Z`). Clients must treat them as UTC — the app converts via `lib/datetime.ts` `serverTime()`. Don't "fix" this server-side without coordinating an app release.
 
 Genuine bugs found in the audits WERE fixed (see git log): cross-branch IDOR via `/bulletin` (endpoints removed), announcement get-by-id IDOR, XFF rate-limit bypass, production `/docs` exposure, `SECRET_KEY` strength gate, scan junk-row injection, several notification-dispatch reliability issues. If a NEW finding appears that isn't in this list or the git log, it's worth acting on.
 
