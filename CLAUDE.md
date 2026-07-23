@@ -49,7 +49,7 @@ Accepted/deferred from the 2026-07-23 pre-release audit (also do not re-report):
 - **App-side: 401-driven logout cannot deauthorize its push token** — the interceptor deletes the access token before `logout()` runs, so the `DELETE /notifications/token` call gets 403 and is skipped. Accepted: the token was already invalid, Expo `DeviceNotRegistered` auto-deactivation self-heals, and re-login upserts the same `(user_id, device_id)` row.
 - **Concurrent-scan race can create a duplicate checkin row** — read-then-write with no row lock. Accepted for the single-kiosk deployment; LMS can correct rows.
 - **`python-jose` is unmaintained** — its known CVEs (JWE bomb, asymmetric alg confusion) don't apply to this HS256-pinned symmetric usage. Deferred: migrate to PyJWT at the next convenient window.
-- **`GET /attendance/history` mixes tz-aware ET bounds with naive-UTC storage** (~4-5h window skew) — endpoint is defined but unused by the app. Deferred; convert bounds to UTC (mirror `get_calendar`) if it's ever wired up.
+- ~~`GET /attendance/history` tz 경계 오차~~ — ET 벽시계 규약 확정(2026-07-23)과 함께 tz-aware 경계를 ET naive로 정규화하는 코드가 들어가 해결됨.
 - **`GET /daily-log` INNER joins task/category** — orphaned logs silently disappear. Pre-existing pending item (INNER→LEFT), not security.
 - **ET-midnight open-row limitation** — documented in the Attendance QR Flow section (owner confirmed no overnight shifts).
 
@@ -85,6 +85,7 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 - `Bearer` JWT access token only — `ACCESS_TOKEN_EXPIRE_MINUTES=4320` (3일). `/auth/login`이 유일한 auth 엔드포인트.
 - Refresh token은 **제거됨** (`/auth/refresh`·`/auth/logout`·`/auth/logout-all` 삭제, `t_refresh_tokens` 테이블 드롭 대상 — changelog.sql 참조). 앱은 토큰 만료 시 재로그인(바이오메트릭 자동 입력)한다. **Accepted trade-off:** 3일 토큰은 서버측 폐기 수단이 없음(로그아웃 = 클라이언트 로컬 삭제). 단 `get_current_user`가 요청마다 `del_yn='N'`을 확인하므로 퇴사 처리된 계정의 토큰은 즉시 무효화된다.
 - Inject `get_current_user` / `require_manager` / `require_admin` from `app/core/dependencies.py` via `Depends`
+- **관측된 동작**: Authorization 헤더가 아예 없는 요청도 `401 "Not authenticated"`을 받는다 (403 아님). 앱 인터셉터는 이를 전제로 **"토큰을 실어 보낸 요청의 401"만** 세션 만료로 처리한다 — 헤더 없는 401을 로그아웃 사유로 삼으면 무한 로그아웃 루프가 재발한다 (2026-07-23 실제로 발생했던 버그, 앱 `lib/apiClient.ts` 참조).
 
 **Role permissions:**
 | Action | staff | manager | admin |
@@ -113,7 +114,7 @@ Kiosk alternative: `POST /api/v1/attendance/manual` `{ wid, ip, device }` — by
 
 `t_usertimecheck` allows **multiple rows per day** (2026-07-22, LMS와 동일) — each row is one in/out pair. Server logic: latest today row has no checkout → set checkout on it; otherwise → new row with checkin. No 409.
 
-"Today" is determined using Eastern Time (`APP_TZ` in `app/core/constants.py`). All `today_start` calculations use ET midnight converted to UTC before querying the DB.
+"Today" is determined using Eastern Time (`APP_TZ` in `app/core/constants.py`). 저장값이 ET 벽시계 naive이므로 `today_start_et()`(ET 자정 naive)로 **변환 없이** 비교한다 — UTC 변환 금지 (2026-07-23 정정, Datetime storage contract 참조).
 
 ## Push Notifications (Expo)
 
