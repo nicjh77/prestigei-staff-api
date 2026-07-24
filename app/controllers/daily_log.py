@@ -30,10 +30,11 @@ def _default_to_date() -> date:
 async def get_daily_logs(
     from_date: date = Query(default_factory=_default_from_date),
     to_date: date = Query(default_factory=_default_to_date),
+    status: list[str] | None = Query(default=None, description="태스크 status 필터 (반복 지정 가능). 생략 시 전체"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    logs = await daily_log_service.get_daily_logs(db, current_user.id, from_date, to_date)
+    logs = await daily_log_service.get_daily_logs(db, current_user.id, from_date, to_date, status)
     return logs
 
 

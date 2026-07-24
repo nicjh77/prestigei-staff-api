@@ -8,7 +8,11 @@ from app.schemas.daily_log import DailyLogOut, TaskReportLog, TaskReportOut
 
 
 async def get_daily_logs(
-    db: AsyncSession, user_id: int, from_date: date, to_date: date
+    db: AsyncSession,
+    user_id: int,
+    from_date: date,
+    to_date: date,
+    statuses: list[str] | None = None,
 ) -> list[DailyLogOut]:
     stmt = (
         select(
@@ -32,6 +36,9 @@ async def get_daily_logs(
         )
         .order_by(DailyLog.logdate.desc(), DailyLog.ins_date.desc())
     )
+    if statuses:
+        # 로그가 속한 태스크의 status 기준 필터 (태스크 없는 고아 로그는 제외됨)
+        stmt = stmt.where(DailyLogTask.status.in_(statuses))
     result = await db.execute(stmt)
     rows = result.all()
     return [
