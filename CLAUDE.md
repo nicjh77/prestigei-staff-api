@@ -50,7 +50,7 @@ Accepted/deferred from the 2026-07-23 pre-release audit (also do not re-report):
 - **Concurrent-scan race can create a duplicate checkin row** — read-then-write with no row lock. Accepted for the single-kiosk deployment; LMS can correct rows.
 - **`python-jose` is unmaintained** — its known CVEs (JWE bomb, asymmetric alg confusion) don't apply to this HS256-pinned symmetric usage. Deferred: migrate to PyJWT at the next convenient window.
 - ~~`GET /attendance/history` tz 경계 오차~~ — ET 벽시계 규약 확정(2026-07-23)과 함께 tz-aware 경계를 ET naive로 정규화하는 코드가 들어가 해결됨.
-- **`GET /daily-log` INNER joins task/category** — orphaned logs silently disappear. Pre-existing pending item (INNER→LEFT), not security.
+- ~~`GET /daily-log` INNER joins~~ — 2026-07-24 LEFT JOIN으로 전환 완료 (Task Log 개편과 함께).
 - **ET-midnight open-row limitation** — documented in the Attendance QR Flow section (owner confirmed no overnight shifts).
 
 **Datetime storage contract (2026-07-23 실측 정정 — 테이블마다 다름!):**
