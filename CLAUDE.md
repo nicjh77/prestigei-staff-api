@@ -177,6 +177,15 @@ Read-only holiday feed over `t_datelist` + holiday/dayoff-aware attendance views
 - Weekends are **not** hardcoded as off — branches have different working days; only `t_datelist`/`t_schedule` decide.
 - `dev_seed.sql` (repo root) has local-only sample data: 2026 federal holidays, branch-holiday examples, dayoff schedules. Never run it in production.
 
+## Daily Log / Task Report
+
+읽기 전용 — 태스크·로그 데이터는 LMS가 쓴다 (`t_daily_log_task`, `t_daily_log`, `t_daily_category`). 코드: `app/services/daily_log_service.py`, `app/controllers/daily_log.py`.
+
+**Endpoints** (`/api/v1/daily-log`, auth: `get_current_user`, 기본 기간 = 오늘(ET)−7일 ~ 오늘 — 미래 logdate 제외):
+- `GET ` — 플랫 로그 리스트. `from_date`/`to_date`/`status`(반복 지정 — 로그가 속한 태스크의 status로 필터, 생략 시 전체). 본인 것만(`ins_by = user.id`), logdate desc·ins_date desc. task/category는 **LEFT JOIN** (고아 로그도 표시).
+- `GET /tasks` — 태스크 리포트 (LMS "Task Report" 화면과 동일 의미). **기간(Period)은 로그의 `logdate` 기준** — 기간 내 내 로그가 있는 태스크만 포함하고 그 로그를 중첩(내림차순)해 반환. task의 startdate/ins_date, 로그의 ins_date는 필터에 쓰지 않음 (LMS 실동작으로 확인). `status` 필터 동일. 응답에 status/progress/target/카테고리/`total_logs`(기간 무관 전체 로그 수) 포함, 기간 내 최신 로그가 있는 태스크가 위.
+- 태스크 status 값 5종: `Planned/Scheduled`, `In progress`, `Completed`, `On hold`, `Cancelled` (앱 기본 필터 = 앞 2개).
+
 ## Rate Limiting
 
 App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
