@@ -190,6 +190,8 @@ Read-only holiday feed over `t_datelist` + holiday/dayoff-aware attendance views
 
 App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied via `Depends(rate_limit(limit, window, scope))` — login (brute force) and the unauthenticated attendance scan (flooding). Per-process (fine for the single-process deployment; limits become per-worker if scaled).
 
+현재 수치: **LOGIN 30회/60초** (2026-07-25에 10→30 상향 — 버킷이 IP 단위라 같은 지점 Wi-Fi의 전 직원이 공유하는 점 + v1.2.0 전환기 전원 재로그인 러시 감안), **SCAN 120회/60초** (키오스크 한 IP가 전 직원을 처리). 디버깅으로 로그인을 연타할 때도 이 제한에 걸릴 수 있음 — 429가 나오면 60초 대기.
+
 **Deployment note:** the API runs behind **Apache2** (`mod_proxy_http`) on Ubuntu (managed by systemd). Apache appends the real client IP to the **end** of `X-Forwarded-For`, so `_client_ip()` reads the **rightmost** value. Using the first value would let a client spoof `X-Forwarded-For` to get a fresh bucket per request and bypass every limit.
 
 ## DB Notes
