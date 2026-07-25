@@ -17,7 +17,8 @@ from collections import defaultdict, deque
 from fastapi import Depends, HTTPException, Request, status
 
 # 엔드포인트별 기본 제한값 (limit 회 / window 초, IP 기준)
-LOGIN_LIMIT, LOGIN_WINDOW = 10, 60           # 로그인 브루트포스 억제
+LOGIN_LIMIT, LOGIN_WINDOW = 30, 60           # 로그인 브루트포스 억제 — IP 단위라 지점 전체가 버킷을 공유하므로
+                                             # 여유 있게 30 (v1.2.0 전환기 전원 재로그인 러시 대비, 2026-07-25)
 SCAN_LIMIT, SCAN_WINDOW = 120, 60            # 무인증 출퇴근 — 정상 키오스크 버스트는 허용, 플러딩만 차단
 
 _CLEANUP_INTERVAL = 60       # 전역 정리 최소 간격(초)
