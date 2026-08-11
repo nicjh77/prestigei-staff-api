@@ -118,7 +118,15 @@ Kiosk alternative: `POST /api/v1/attendance/manual` `{ wid, ip, device }` — by
 
 ## Push Notifications (Expo)
 
-Push uses the Expo Push API over HTTP (`httpx`). Code: `app/utils/expo_push.py` (Expo wrapper), `app/services/notification_service.py`, `app/controllers/notifications.py`, models in `app/models/notification.py`.
+**Transport (2026-08 FCM 전환 — 앱 v1.3.0부터 양 플랫폼 FCM 직접, 구버전은 Expo 경유):**
+
+Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일한 진입점(`send_push_notifications`)이고, 토큰이 `ExponentPushToken[`/`ExpoPushToken[`로 시작하면 Expo, 아니면 FCM으로 보낸 뒤 결과를 합친다. Code: `app/utils/push.py` (분기 + `PushResult`), `app/utils/fcm_push.py` (firebase-admin), `app/utils/expo_push.py` (레거시 Expo), `app/services/notification_service.py`, `app/controllers/notifications.py`, models in `app/models/notification.py`.
+
+- **앱 v1.3.0+ (Android/iOS 공통)** → `@react-native-firebase/messaging`의 `getToken()`으로 네이티브 FCM 토큰 등록 → **FCM 직접 발송**. iOS 발송은 Firebase Console에 APNs Auth Key(.p8)가 업로드돼 있어야 실제 전달된다.
+- **구버전 앱(≤1.2.0)**은 Expo 토큰을 보낸다 — 이중 경로가 그대로 처리하므로 전환 중 공백이 없다. `device_id`가 동일해 `(user_id, device_id)` upsert로 앱 업데이트 시 자동으로 FCM 토큰으로 덮어써진다(마이그레이션 스크립트 불필요).
+- 구버전 설치분이 모두 사라지면 `expo_push.py`와 `push.py`의 분기를 삭제할 것.
+
+**부팅 안전성 (중요):** `firebase_admin`은 **절대 모듈 최상단에서 import하지 않는다.** `push.py`가 실제 발송 시점에 함수 안에서 import하고, `fcm_push._get_app()`이 자격증명을 그때 처음 읽는다. 서비스 계정 키가 없거나 경로가 틀려도 **서버는 정상 부팅하고 그 발송만 실패**한다 — 최상단 import로 바꾸면 키 파일 하나 빠졌을 때 앱 전체가 안 떠서 로그인 불가가 된다 (수동 FileZilla 배포라 충분히 있을 수 있는 사고). 자격증명 오류로는 토큰을 비활성화하지 않는다(영구 무효 코드만 비활성화).
 
 **Endpoints** (under `/api/v1/notifications`):
 - `POST /token` — register/refresh the caller's Expo push token (auth: `get_current_user`). Upsert keyed on `(user_id, device_id)`; re-registering reactivates and updates the token.
@@ -137,9 +145,10 @@ Push uses the Expo Push API over HTTP (`httpx`). Code: `app/utils/expo_push.py` 
 - The `t_notification_log` row stores the **original HTML** `title`/`body` (used for in-app notification modal rendering). Before sending to Expo, both are run through `_strip_html()` (stdlib `re` + `html.unescape`) so OS push banners show clean plain text — tags removed, entities decoded, whitespace collapsed. DB keeps HTML; the banner gets plain text.
 - Target `user_ids` are filtered to IDs that actually exist in `t_user` **and are not soft-deleted (`del_yn='N'`)** (`SELECT id ... WHERE id IN (...) AND del_yn='N'`), which also de-duplicates — preventing FK violations from bad LMS input and `(notification_id, user_id)` unique-constraint rollbacks. `user_ids = null` broadcasts to all active (non-deleted) users; `user_ids = []` (empty list) targets **nobody** — it is **not** treated as a broadcast (the code checks `is not None`, not truthiness). The broadcast token query in `dispatch_notification` joins `t_user` and excludes `del_yn='Y'`, so terminated employees' devices don't receive internal notices.
 - Final `status` starts `pending` and is updated by the background task: `sent` if Expo reports ≥1 success, else `failed`; `push_response` records `success=N failure=M`. `dispatch_notification` wraps its whole body in a top-level `try/except` that best-effort marks the log `failed` (in a fresh session) on any DB error, so a DB failure during dispatch no longer silently strands the row at `pending`. Only a process death before/at dispatch can still leave a row `pending`.
-- `send_push_notifications` is a blocking call — offloaded via `anyio.to_thread.run_sync` so it doesn't block the event loop.
-- Batched to Expo's **100-message-per-request** limit.
-- Tokens Expo reports as `DeviceNotRegistered` are auto-deactivated (`is_active = False`) so dead tokens stop accumulating.
+- `send_push_notifications` is a blocking call — offloaded via `anyio.to_thread.run_sync` so it doesn't block the event loop. `fcm_push._get_app()` is therefore called from a worker thread and guards its lazy init with a lock.
+- Batched per transport: **FCM 500/request** (`send_each_for_multicast`), **Expo 100/request**.
+- 죽은 토큰 자동 비활성화(`is_active = False`) — FCM은 `UnregisteredError` / `SenderIdMismatchError` / `InvalidArgumentError`, Expo는 `DeviceNotRegistered`. **일시적 오류(Unavailable/Internal)나 자격증명 오류로는 비활성화하지 않는다** — 그랬다간 Firebase 설정 실수 한 번에 전 사용자 토큰이 날아간다.
+- FCM `data` payload는 **문자열 값만** 허용 — `fcm_push`가 모든 값을 `str()`로 강제한다. Android 알림 채널 id는 `default`로 보내며, 앱 `lib/notifications.ts`가 만드는 채널 id와 반드시 일치해야 한다.
 
 **LMS Integration:**
 - LMS calls `POST /notifications/send` with `X-API-Key` header (value must match `LMS_API_KEY` env var).
@@ -148,7 +157,9 @@ Push uses the Expo Push API over HTTP (`httpx`). Code: `app/utils/expo_push.py` 
 - Scheduled sends are handled by LMS scheduler — Staff API sends immediately on each call.
 
 **Runtime requirements (production):**
-- No extra pip installs — `httpx` and `anyio` are already pinned in `requirements.txt`. No service-account file or credentials are required (Expo's public push endpoint).
+- `pip install -r requirements.txt` — **`firebase-admin` 추가됨**. 설치 시 `httpx`가 0.27.0 → **0.28.1**로 올라간다(firebase-admin 요구), 그 외 `grpcio`/`protobuf`/`google-cloud-*` 등 전이 의존성이 함께 들어온다. 배포 서버에서 재설치 필요.
+- **`FIREBASE_CREDENTIALS_PATH`** (신규, optional) — Firebase 서비스 계정 JSON 키의 절대 경로. Firebase Console → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성. **키 파일은 절대 커밋 금지.** 비우면 `GOOGLE_APPLICATION_CREDENTIALS`로 폴백하고, 둘 다 없으면 FCM 발송만 실패한다(서버는 정상 부팅). Firebase 프로젝트는 `prestigei-staff`.
+- Expo 경로는 여전히 자격증명 불필요(공개 엔드포인트).
 
 ## Notice Board (Notice)
 

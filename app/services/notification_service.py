@@ -13,7 +13,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.notification import NotificationLog, NotificationRecipient, PushToken
 from app.models.user import User
 from app.schemas.notification import NotificationItem, PushTokenRegister, SendNotificationRequest
-from app.utils.expo_push import send_push_notifications
+from app.utils.push import send_push_notifications
 
 
 def _strip_html(text: str) -> str:
@@ -84,7 +84,7 @@ async def dispatch_notification(
     body: str,
     data: dict | None,
 ) -> None:
-    """백그라운드에서 Expo 푸시를 발송하고 로그 상태를 갱신한다.
+    """백그라운드에서 푸시를 발송하고 로그 상태를 갱신한다 (FCM / 레거시 Expo 자동 분기).
 
     요청 트랜잭션과 분리된 자체 세션을 쓰며, 외부 HTTP 호출(가장 오래 걸리는 구간)
     동안에는 DB 커넥션을 반납한 상태로 대기한다.
@@ -123,7 +123,8 @@ async def dispatch_notification(
                 status_val = "failed"
                 response_val = str(e)
 
-        # 3) 로그 상태 갱신 + Expo가 DeviceNotRegistered로 보고한 죽은 토큰 비활성화
+        # 3) 로그 상태 갱신 + 무효로 보고된 죽은 토큰 비활성화
+        #    (FCM: UNREGISTERED/SenderIdMismatch/InvalidArgument, Expo: DeviceNotRegistered)
         #    (짧은 세션 — 백그라운드 태스크라 get_db가 없으므로 명시적으로 커밋)
         async with AsyncSessionLocal() as session:
             values: dict = {"status": status_val, "push_response": response_val[:500]}

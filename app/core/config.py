@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # LMS Integration
     LMS_API_KEY: str = ""
 
+    # Push (FCM) — 서비스 계정 JSON 키 경로. 비우면 기본 자격증명(GOOGLE_APPLICATION_CREDENTIALS)으로 폴백.
+    # 값이 틀리거나 파일이 없어도 부팅은 막지 않는다 — 첫 발송 시점에만 읽히고, 실패해도 그 발송만 실패한다.
+    FIREBASE_CREDENTIALS_PATH: str = ""
+
     model_config = SettingsConfigDict(
         env_file=_env_file,
         env_file_encoding="utf-8",

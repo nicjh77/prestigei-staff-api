@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
-
 import httpx
+
+from app.utils.push import PushResult
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
@@ -8,25 +8,20 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _BATCH_LIMIT = 100
 
 
-@dataclass
-class PushResult:
-    success_count: int = 0
-    failure_count: int = 0
-    invalid_tokens: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-
 def _chunks(items: list, size: int):
     for i in range(0, len(items), size):
         yield items[i:i + size]
 
 
-def send_push_notifications(
+def send_expo_push(
     tokens: list[str], title: str, body: str, data: dict
 ) -> PushResult:
     """Send push notifications via Expo Push API, batched to 100 per request.
 
     This is a blocking (synchronous) call — callers in async context must offload it.
+
+    레거시 경로 — 구버전 앱이 등록한 Expo 토큰만 여기로 온다 (`app/utils/push.py`가 분기).
+    구버전 설치가 모두 사라지면 이 모듈째 삭제 가능.
     """
     result = PushResult()
     messages = [
