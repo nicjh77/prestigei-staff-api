@@ -69,7 +69,12 @@ def send_fcm_push(
     # FCM data payload는 문자열만 허용 — 값을 모두 str로 강제
     str_data = {str(k): str(v) for k, v in (data or {}).items()}
 
-    notification = messaging.Notification(title=title, body=body)
+    # data.imageUrl이 있으면 Android 배너에 큰 이미지(BigPicture)로 표시된다 (LMS 계약, 2026-08-11).
+    # iOS 배너 이미지는 Notification Service Extension이 필요해 미지원 — 앱 상세 모달에서만 표시.
+    image_url = str_data.get("imageUrl")
+    if image_url and not image_url.startswith("http"):
+        image_url = None
+    notification = messaging.Notification(title=title, body=body, image=image_url)
     android_config = messaging.AndroidConfig(
         priority="high",
         notification=messaging.AndroidNotification(

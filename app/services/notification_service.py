@@ -109,9 +109,15 @@ async def dispatch_notification(
             response_val = "no active tokens"
         else:
             try:
-                # DB에는 HTML 원본 저장, 배너에는 plain text 전송
+                # DB에는 HTML 원본 저장, 배너에는 plain text 전송.
+                # payload에 notification_id(=log.id)를 자동 포함 — 앱이 배너 탭 시
+                # 목록을 거치지 않고 해당 알림의 상세 모달을 바로 연다 (2026-08-11).
                 send_result = await anyio.to_thread.run_sync(
-                    send_push_notifications, tokens, _strip_html(title), _strip_html(body), data or {}
+                    send_push_notifications,
+                    tokens,
+                    _strip_html(title),
+                    _strip_html(body),
+                    {**(data or {}), "notification_id": str(log_id)},
                 )
                 invalid_tokens = send_result.invalid_tokens
                 status_val = "sent" if send_result.success_count > 0 else "failed"
