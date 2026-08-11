@@ -65,9 +65,15 @@ async def send_notification(
     _auth: None = Depends(require_admin_or_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    # 로그 + 수신자 레코드는 요청 트랜잭션에서 즉시 기록(커밋)하고,
-    # 실제 Expo 발송은 응답 이후 백그라운드에서 처리 → DB 커넥션을 오래 점유하지 않음
+    # 로그 + 수신자 레코드를 만들고 발송은 응답 이후 백그라운드에서 처리한다.
     log_id = await notification_service.prepare_notification(db, data)
+    # ⚠️ add_task 전에 반드시 명시 커밋 (2026-08-11 프로덕션 1205 에러로 확인된 순서 문제):
+    # get_db의 커밋(yield 이후)은 백그라운드 태스크가 끝난 "뒤"에 실행된다. 커밋 없이 넘어가면
+    # dispatch_notification의 상태 UPDATE가 아직 커밋 안 된 INSERT의 행 잠금에 걸려
+    # 50초 lock wait timeout(1205)으로 죽고, 로그가 영원히 pending으로 남는다.
+    # 커밋으로 잠금을 먼저 풀어야 백그라운드가 같은 행을 갱신할 수 있다.
+    # ("서비스는 commit 금지" 규칙의 유일한 예외 지점 — 컨트롤러 레벨이며 사유가 명확할 것.)
+    await db.commit()
     background_tasks.add_task(
         notification_service.dispatch_notification,
         log_id, data.user_ids, data.title, data.body, data.data,
