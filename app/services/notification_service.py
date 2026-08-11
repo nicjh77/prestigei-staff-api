@@ -1,7 +1,7 @@
 import html as html_lib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 import anyio
 from sqlalchemy import func, insert, select, update
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from app.core.constants import now_et
 from app.core.database import AsyncSessionLocal
 from app.models.notification import NotificationLog, NotificationRecipient, PushToken
 from app.models.user import User
@@ -68,7 +69,7 @@ async def prepare_notification(db: AsyncSession, data: SendNotificationRequest) 
     target_ids = [row[0] for row in result.all()]
 
     if target_ids:
-        now = datetime.now(timezone.utc)
+        now = now_et()
         await db.execute(
             insert(NotificationRecipient),
             [{"notification_id": log.id, "user_id": uid, "created_at": now, "updated_at": now} for uid in target_ids],
@@ -135,7 +136,7 @@ async def dispatch_notification(
         async with AsyncSessionLocal() as session:
             values: dict = {"status": status_val, "push_response": response_val[:500]}
             if status_val == "sent":
-                values["sent_at"] = datetime.now(timezone.utc)
+                values["sent_at"] = now_et()
             await session.execute(
                 update(NotificationLog).where(NotificationLog.id == log_id).values(**values)
             )
@@ -219,7 +220,7 @@ async def mark_as_read(db: AsyncSession, user_id: int, recipient_id: int) -> boo
     if not recipient:
         return False
     recipient.is_read = True
-    recipient.read_at = datetime.now(timezone.utc)
+    recipient.read_at = now_et()
     return True
 
 
@@ -227,6 +228,6 @@ async def mark_all_as_read(db: AsyncSession, user_id: int) -> int:
     result = await db.execute(
         update(NotificationRecipient)
         .where(NotificationRecipient.user_id == user_id, NotificationRecipient.is_read == False)  # noqa: E712
-        .values(is_read=True, read_at=datetime.now(timezone.utc))
+        .values(is_read=True, read_at=now_et())
     )
     return result.rowcount

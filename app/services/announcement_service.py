@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import now_et
 from app.models.announcement import Announcement, AnnouncementRead
 from app.models.user import User
 
@@ -16,7 +17,7 @@ _VISIBLE_ROLES: dict[str, list[str]] = {
 
 
 def _active_filter(query, user_role: str):
-    now = datetime.now(timezone.utc)
+    now = now_et()
     visible = _VISIBLE_ROLES.get(user_role, ["all"])
     return query.where(
         Announcement.deleted_at.is_(None),
@@ -61,7 +62,7 @@ async def get_announcement(db: AsyncSession, announcement_id: int, user: User) -
         )
     )
     if read_result.scalar_one_or_none() is None:
-        db.add(AnnouncementRead(announcement_id=announcement_id, user_id=user.id, read_at=datetime.now(timezone.utc)))
+        db.add(AnnouncementRead(announcement_id=announcement_id, user_id=user.id, read_at=now_et()))
 
     return ann
 

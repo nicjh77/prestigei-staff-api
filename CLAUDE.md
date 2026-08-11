@@ -53,10 +53,13 @@ Accepted/deferred from the 2026-07-23 pre-release audit (also do not re-report):
 - ~~`GET /daily-log` INNER joins~~ — 2026-07-24 LEFT JOIN으로 전환 완료 (Task Log 개편과 함께).
 - **ET-midnight open-row limitation** — documented in the Attendance QR Flow section (owner confirmed no overnight shifts).
 
-**Datetime storage contract (2026-07-23 실측 정정 — 테이블마다 다름!):**
-- **`t_usertimecheck` (출퇴근)**: LMS/터미널이 **ET 벽시계 naive**로 저장 (프로덕션 실데이터로 확인 — 아침 출근이 08:0x로 저장됨). staff-api의 `/scan`·`/manual`도 `datetime.now(APP_TZ).replace(tzinfo=None)`로 동일하게 쓰고, 조회 경계(`today_start_et`, 캘린더 월 경계)도 ET naive로 비교한다. **UTC로 "고치지" 말 것** — LMS와 어긋나며 앱 표시도 4시간 깨진다 (한 번 겪음).
-- **`t_notification_*` (staff-api가 쓰는 테이블)**: naive **UTC** 저장 — 앱은 `serverTime()`으로 로컬 변환해 표시.
-- 직렬화는 둘 다 오프셋 없는 ISO 문자열 (`2026-07-22T18:53:18`, no `Z`) — 어느 규약인지는 테이블(쓰는 주체)로 판단.
+**Datetime storage contract (2026-08-12 통일 — 전부 ET):**
+- **DB의 모든 datetime은 ET 벽시계 naive**다 (`app/core/constants.py`의 `now_et()` 사용). 사용자·지점이 전부 동부(토론토/NY/GA)라, LMS/터미널의 기존 규약(`t_usertimecheck`)을 staff-api 소유 테이블(`t_notification_*`, `t_push_token`, `t_announcement*`)까지 확대했다. `TimestampMixin`(created_at/updated_at)과 `sent_at`/`read_at` 모두 `now_et()`.
+- 앱은 **변환 없이 그대로 표시** (`dayjs(dt)`) — `serverTime()`(UTC→로컬 변환)은 폐기됨, 사용 금지.
+- LMS도 변환 없이 그대로 표시하면 된다.
+- **유일한 예외: JWT 만료(`security.py`)는 UTC 유지** — 표시용이 아니라 epoch 기반 토큰 표준 계산이라 절대 ET로 바꾸지 말 것.
+- 이전 이력: ~2026-08-11까지 알림 계열은 UTC 저장이었음 (해당 시점 이전의 남은 행은 -4h 보정 마이그레이션 완료). 직렬화는 오프셋 없는 ISO 문자열 (`2026-07-22T18:53:18`, no `Z`).
+- DST 한계: ET naive는 11월 시계 되돌리는 1시간이 모호하다 — 출퇴근과 동일하게 수용 (야간 근무 없음 전제).
 
 Genuine bugs found in the audits WERE fixed (see git log): cross-branch IDOR via `/bulletin` (endpoints removed), announcement get-by-id IDOR, XFF rate-limit bypass, production `/docs` exposure, `SECRET_KEY` strength gate, scan junk-row injection, several notification-dispatch reliability issues. If a NEW finding appears that isn't in this list or the git log, it's worth acting on.
 
