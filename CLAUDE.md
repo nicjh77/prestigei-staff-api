@@ -158,7 +158,7 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 
 **Runtime requirements (production):**
 - `pip install -r requirements.txt` — **`firebase-admin` 추가됨**. 설치 시 `httpx`가 0.27.0 → **0.28.1**로 올라간다(firebase-admin 요구), 그 외 `grpcio`/`protobuf`/`google-cloud-*` 등 전이 의존성이 함께 들어온다. 배포 서버에서 재설치 필요.
-- **`FIREBASE_CREDENTIALS_PATH`** (신규, optional) — Firebase 서비스 계정 JSON 키의 절대 경로. Firebase Console → 프로젝트 설정 → 서비스 계정 → 새 비공개 키 생성. **키 파일은 절대 커밋 금지.** 비우면 `GOOGLE_APPLICATION_CREDENTIALS`로 폴백하고, 둘 다 없으면 FCM 발송만 실패한다(서버는 정상 부팅). Firebase 프로젝트는 `prestigei-staff`.
+- **`FIREBASE_CREDENTIALS_PATH`** (신규, optional) — Firebase 서비스 계정 JSON 키 경로. 관례: 프로젝트 루트에 `firebase-serviceAccountKey.json`으로 두고 상대 경로로 참조 (로컬/서버 동일, `.gitignore`의 `*.json` 규칙이 커밋을 막는다 — git 히스토리에 올라간 적 없음 확인됨 2026-08-11). **키 파일은 절대 커밋 금지.** 비우면 `GOOGLE_APPLICATION_CREDENTIALS`로 폴백하고, 둘 다 없으면 FCM 발송만 실패한다(서버는 정상 부팅). Firebase 프로젝트는 `prestigei-staff`.
 - Expo 경로는 여전히 자격증명 불필요(공개 엔드포인트).
 
 ## Notice Board (Notice)
