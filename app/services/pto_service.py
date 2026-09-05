@@ -16,7 +16,10 @@ from app.core.constants import (
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.models.vacation import Vacation
-from app.schemas.pto import PtoBalance, PtoCreate, PtoDay, PtoItem, PtoListResponse, PtoUpdate
+from app.schemas.pto import (
+    PtoBalance, PtoCreate, PtoCreateResponse, PtoDay, PtoItem, PtoListResponse, PtoUpdate, SkippedHoliday,
+)
+from app.services import holiday_service
 
 _WORK_SECONDS = WORK_HOURS * 60 * 60
 
@@ -197,15 +200,39 @@ async def _reject_duplicates(
         )
 
 
-async def create_pto(db: AsyncSession, user: User, data: PtoCreate) -> list[PtoItem]:
+async def _holidays_on(db: AsyncSession, user: User, dates: list[date]) -> dict[date, str | None]:
+    """공휴일(t_datelist) + 내 지점 휴일(t_holiday) — dayoff 자동 제외 판정용"""
+    if not dates:
+        return {}
+    hols = await holiday_service.get_holidays(db, user.bid, min(dates), max(dates))
+    wanted = set(dates)
+    return {h.sdate: h.holidaynm for h in hols if h.sdate in wanted}
+
+
+async def create_pto(db: AsyncSession, user: User, data: PtoCreate) -> PtoCreateResponse:
     today = _today()
     for d in data.days:
         _require_not_past(d.date, today)
-    await _reject_duplicates(db, user, data.eventtype, [d.date for d in data.days])
+
+    # dayoff는 휴일(전체·내 지점)을 자동 제외 — LMS Staff Schedule과 동일 규칙 (오너 2026-09-05).
+    # 일요일 등 요일은 지점마다 근무 여부가 달라 건드리지 않는다. personal/other는 휴일에도 그대로 추가.
+    days = list(data.days)
+    skipped: list[SkippedHoliday] = []
+    if data.eventtype == "dayoff":
+        hol = await _holidays_on(db, user, [d.date for d in days])
+        skipped = [SkippedHoliday(date=d.date, name=hol[d.date]) for d in days if d.date in hol]
+        days = [d for d in days if d.date not in hol]
+        if not days:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All selected dates are holidays — Day Off is not needed on a holiday",
+            )
+
+    await _reject_duplicates(db, user, data.eventtype, [d.date for d in days])
 
     now = now_et()
     rows: list[Schedule] = []
-    for d in data.days:  # 하루 1행 (LMS와 동일: sdate = edate)
+    for d in days:  # 하루 1행 (LMS와 동일: sdate = edate)
         rows.append(Schedule(
             tid=user.id, uid=user.id, wid=user.id,
             sdate=d.date, edate=d.date,
@@ -215,7 +242,7 @@ async def create_pto(db: AsyncSession, user: User, data: PtoCreate) -> list[PtoI
         ))
     db.add_all(rows)
     await db.flush()  # schid 확보
-    return [_to_item(s, today) for s in rows]
+    return PtoCreateResponse(items=[_to_item(s, today) for s in rows], skipped=skipped)
 
 
 async def update_pto(db: AsyncSession, user: User, schid: int, data: PtoUpdate) -> PtoItem:
@@ -227,6 +254,13 @@ async def update_pto(db: AsyncSession, user: User, schid: int, data: PtoUpdate) 
     new_type = data.eventtype or s.eventtype
     if data.date is not None:
         _require_not_past(new_date, today)
+    if new_type == "dayoff" and (new_date != s.sdate or new_type != s.eventtype):
+        hol = await _holidays_on(db, user, [new_date])
+        if new_date in hol:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{new_date.isoformat()} is a holiday ({hol[new_date] or 'Holiday'}) — Day Off is not needed",
+            )
     if new_date != s.sdate or new_type != s.eventtype:
         await _reject_duplicates(db, user, new_type, [new_date], exclude_schid=s.schid)
 

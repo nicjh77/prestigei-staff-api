@@ -197,16 +197,16 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 
 **Endpoints** (`/api/v1/pto`, auth: `get_current_user`):
 - `GET ?year=` — 해당 연도(기본 올해 ET) 내 PTO 목록 + `balance` `{assigned, used, remaining, from_date, to_date}`. 항목마다 `mode`(`allday|am|pm|custom`), `days`(사용일수), `editable`(`date >= 오늘 ET`).
-- `POST` `{eventtype, eventname, days:[{date, mode, stime?, etime?}]}` — **여러 날 = 하루 1행씩** 생성(최대 31일, 날짜 중복 불가). `tid = uid = wid = 본인 id`, `ins_date/upd_date = now_et()`. 201 + 생성된 항목 배열.
+- `POST` `{eventtype, eventname, days:[{date, mode, stime?, etime?}]}` — **여러 날 = 하루 1행씩** 생성(최대 31일, 날짜 중복 불가). `tid = uid = wid = 본인 id`, `ins_date/upd_date = now_et()`. 201 + `{items: 생성된 항목, skipped: [{date, name}]}` (skipped = dayoff에서 휴일이라 자동 제외된 날).
 - `PATCH /{schid}` — 타입/메모/날짜/모드 수정. `DELETE /{schid}`.
 
 **정책 (오너 확정 2026-09-05 — 재검토 금지):**
 - **과거 날짜(`sdate < 오늘 ET`)는 역할 무관 앱에서 생성·수정·삭제 전부 403** ("Past entries can only be changed in the LMS"). 오늘 당일은 허용. LMS의 "권한 있으면 과거 수정" 예외는 앱에 두지 않는다 — `user_role`이 자유 텍스트라 서버가 관리자를 판별할 수 없고, 과거 수정은 HR 성격이라 LMS 감사 하에 둔다.
 - **잔여 초과는 경고만** (`remaining`이 음수가 될 수 있음) — 서버는 차단하지 않는다.
 - **같은 날 같은 타입 중복은 409** (dayoff 이중 집계 방지; 레거시 스팬 행도 포함 판정). dayoff + personal 같은 날은 허용.
-- **주말·휴일 자동 제외 안 함** — LMS도 토·일 dayoff를 그대로 저장. 앱이 표시만 한다.
+- **휴일 자동 제외 (2026-09-05 요구사항 변경 — dayoff만):** `dayoff` 제출 시 공휴일(`t_datelist`) + 내 지점 휴일(`t_holiday.bid = user.bid`)에 해당하는 날은 서버가 자동으로 빼고 `POST` 응답 `skipped`에 알려준다(LMS Staff Schedule과 동일). 전부 휴일이면 400. `PATCH`로 dayoff를 휴일 날짜로 옮기는 것도 400. **`personal`/`other`는 휴일에도 그대로 추가.** **요일(일요일 등)은 건드리지 않는다** — 지점마다 일요일 근무 여부가 달라서. 앱도 같은 규칙으로 미리 걸러 준다(휴일 셀 취소선·비활성, Range 확장 시 자동 제외, 타입을 Day Off로 바꾸면 휴일 행 제거).
 - 본인 행이 아니거나 PTO 타입이 아니면 404 (class 행 등은 절대 수정 불가). 휴가여도 `/scan`은 그대로 동작(초과근무 등).
-- **추가 확정 (2026-09-05 오너):** 삭제는 하루 단위(일괄 삭제 없음 — 행이 하루 1행이라 LMS와 동일) / **관리자가 대신 입력한 미래 PTO도 본인이 수정·삭제 가능**(`tid = 본인`이면 본인 행; `wid`는 보지 않음) / 주말·휴일 자동 제외 없음(앱 일자 행에서 ✕로 제외) / 한 번 제출 = 타입·메모 하나, 중복 시 요청 전체 409(부분 저장 없음).
+- **추가 확정 (2026-09-05 오너):** 삭제는 하루 단위(일괄 삭제 없음 — 행이 하루 1행이라 LMS와 동일) / **관리자가 대신 입력한 미래 PTO도 본인이 수정·삭제 가능**(`tid = 본인`이면 본인 행; `wid`는 보지 않음) / 요일은 자동 제외 없음(휴일만 dayoff에서 자동 제외 — 위 항목) / 한 번 제출 = 타입·메모 하나, 중복 시 요청 전체 409(부분 저장 없음).
 
 **사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). `dayoff`만 합산, 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. `assigned` = `t_vacation.vacationday WHERE userid=본인 AND ayear='<년>'`(char), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
 

@@ -73,6 +73,16 @@ class PtoItem(BaseModel):
     editable: bool              # date >= 오늘(ET) — 과거는 LMS에서만 수정
 
 
+class SkippedHoliday(BaseModel):
+    date: date_type
+    name: str | None
+
+
+class PtoCreateResponse(BaseModel):
+    items: list[PtoItem]                 # 실제 생성된 행
+    skipped: list[SkippedHoliday] = []   # dayoff에서 휴일이라 자동 제외된 날짜 (LMS와 동일 규칙)
+
+
 class PtoBalance(BaseModel):
     year: int
     assigned: float             # t_vacation.vacationday (배정 행 없으면 0.0 — LMS IFNULL과 동일)

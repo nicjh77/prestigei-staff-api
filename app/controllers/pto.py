@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.common import MessageResponse
-from app.schemas.pto import PtoCreate, PtoItem, PtoListResponse, PtoUpdate
+from app.schemas.pto import PtoCreate, PtoCreateResponse, PtoItem, PtoListResponse, PtoUpdate
 from app.services import pto_service
 
 # 자가 제출 PTO — 이 API에서 t_schedule에 쓰는 유일한 경로. 본인·PTO 타입·오늘(ET) 이후 행만.
@@ -29,13 +29,14 @@ async def list_pto(
     return await pto_service.list_pto(db, current_user, year)
 
 
-@router.post("", response_model=list[PtoItem], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PtoCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_pto(
     data: PtoCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """여러 날 제출 → 하루 1행씩 생성 (LMS와 동일). 과거 날짜 403, 같은 날 같은 타입 중복 409."""
+    """여러 날 제출 → 하루 1행씩 생성 (LMS와 동일). 과거 날짜 403, 같은 날 같은 타입 중복 409.
+    dayoff는 휴일(공휴일·내 지점)을 자동 제외하고 `skipped`로 알려준다 (전부 휴일이면 400)."""
     return await pto_service.create_pto(db, current_user, data)
 
 
