@@ -1,6 +1,6 @@
 -- =====================================================================
 -- dev_seed.sql — 로컬 개발용 샘플 데이터 (프로덕션 실행 금지)
--- attendance 캘린더 / 휴일 / 휴가 기능 테스트용.
+-- attendance 캘린더 / 휴일 / 휴가(PTO) 기능 테스트용.
 -- 실행: mysql -u root -p prestigei < dev_seed.sql  (또는 워크벤치에서 실행)
 -- =====================================================================
 
@@ -28,17 +28,18 @@ ON DUPLICATE KEY UPDATE
     `bid` = VALUES(`bid`);
 
 -- ---------------------------------------------------------------
--- 2) t_datelist — 지점별 휴일 예시 (bid = JSON 배열 문자열)
+-- 2) t_holiday — 지점별 휴일 예시 (LMS "Manage Holidays"가 쓰는 테이블, bid = int)
 --    지점: 1=BS 2=WC 3=CL 4=PP 6=HQ 7=ON 8=SW 9=HA 11=WE 12=CU 13=CK 14=AP 15=OT
+--    (2026-09-05: 구 t_datelist.bid JSON 방식은 LMS가 채택하지 않아 폐기 — 프로덕션 전부 NULL)
 -- ---------------------------------------------------------------
-INSERT INTO `t_datelist` (`sdate`, `weekday`, `holidayyn`, `holidaynm`, `bid`) VALUES
-    ('2026-07-15', 'WEDNESDAY', 'Y', 'WC Founding Day',        '["2"]'),
-    ('2026-07-20', 'MONDAY',    'Y', 'PP/SW Branch Holiday',   '["4","8"]')
-ON DUPLICATE KEY UPDATE
-    `weekday` = VALUES(`weekday`),
-    `holidayyn` = VALUES(`holidayyn`),
-    `holidaynm` = VALUES(`holidaynm`),
-    `bid` = VALUES(`bid`);
+INSERT INTO `t_holiday` (`sdate`, `bid`, `holidayyn`, `holidaynm`) VALUES
+    ('2026-07-15', 2, 'Y', 'WC Founding Day'),
+    ('2026-07-20', 4, 'Y', 'PP Branch Holiday'),
+    ('2026-07-20', 8, 'Y', 'SW Branch Holiday'),
+    ('2026-09-11', 3, 'Y', 'Special CL day');
+
+-- 구 지점 휴일 시드 정리 (이전 dev_seed로 t_datelist.bid에 넣었던 행 되돌리기)
+UPDATE `t_datelist` SET `holidayyn` = 'N', `holidaynm` = NULL, `bid` = NULL WHERE `bid` IS NOT NULL;
 
 -- ---------------------------------------------------------------
 -- 3) t_schedule — 휴가(dayoff) 샘플

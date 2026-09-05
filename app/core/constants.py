@@ -18,3 +18,19 @@ def now_et():
 # t_schedule.eventtype 중 "근무 아님"으로 취급하는 유형 (attendance 캘린더 / 오늘 상태)
 # 프로덕션에서 다른 유형이 확인되면 여기에 추가 (예: "vacation")
 DAYOFF_EVENT_TYPES = frozenset({"dayoff"})
+
+# ---- PTO (자가 제출 개인 일정) ----
+# t_schedule.eventtype 중 직원이 앱에서 직접 제출/수정/삭제할 수 있는 유형.
+# LMS Staff Schedule과 동일: 대상자는 tid(=t_user.id), uid/wid = 작성자. dayoff만 휴가 일수에 집계.
+PTO_EVENT_TYPES = frozenset({"dayoff", "personal", "other"})
+
+# 근무시간 08:00~17:00 (점심 12~13). LMS가 저장하는 값과 동일해야 한다.
+#   종일   : stime 08:00 / etime 17:00 / allday Y / halfday N
+#   오전반차: stime 08:00 / etime 12:00 / allday N / halfday A
+#   오후반차: stime 13:00 / etime 17:00 / allday N / halfday P
+#   시간지정: 임의            / allday N / halfday N
+WORK_START = "08:00"
+WORK_END = "17:00"
+HALF_AM = ("08:00", "12:00")
+HALF_PM = ("13:00", "17:00")
+WORK_HOURS = 8

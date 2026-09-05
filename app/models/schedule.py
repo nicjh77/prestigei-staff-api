@@ -10,14 +10,17 @@ class Schedule(Base):
     __tablename__ = "t_schedule"
 
     schid: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # t_teacher.tid (티처 일정)
-    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # t_user.id — 일반 직원 일정 대상 (2026-07 추가)
-    wid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 작성자 t_user.id (대상 아님)
+    # 대상자 키 (2026-09-05 오너 확인): PTO(dayoff/personal/other)는 tid = t_user.id,
+    # 티처 수업 일정은 tid = t_teacher.tid. uid/wid는 둘 다 작성자(로그인 사용자) — 대상 아님.
+    tid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 작성자 t_user.id (LMS 로그인 사용자)
+    wid: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 작성자 t_user.id
     sdate: Mapped[date | None] = mapped_column(Date, nullable=True)
     edate: Mapped[date | None] = mapped_column(Date, nullable=True)
     stime: Mapped[str | None] = mapped_column(String(5), nullable=True)
     etime: Mapped[str | None] = mapped_column(String(5), nullable=True)
     allday: Mapped[str] = mapped_column(CHAR(1), nullable=False, default="N")
+    halfday: Mapped[str | None] = mapped_column(CHAR(1), nullable=True, default="N")  # N / A(오전) / P(오후)
     eventname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     eventtype: Mapped[str | None] = mapped_column(String(100), nullable=True)
     eventid: Mapped[str | None] = mapped_column(String(255), nullable=True)

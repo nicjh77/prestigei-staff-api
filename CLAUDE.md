@@ -96,7 +96,7 @@ All routers are registered in `app/core/router.py` under `/api/v1/<path>`.
 | View notices / announcements / schedule / weekly vision | O | O | O |
 | Send push notifications | X | X | O (or LMS API Key) |
 
-**This API is read-only for content.** Schedules, announcements, notice posts, and weekly vision are created/edited/deleted **directly in the DB by the LMS** — the Staff API's write routes (`POST/PUT/DELETE` on `/schedule`, `/announcements`, `/bulletin`) were **removed**; only `GET` remains. The one content-mutating endpoint is `POST /notifications/send` (admin JWT or LMS `X-API-Key`). Per-user self-service writes remain: `PATCH /users/me` (profile) and `POST /users/me/password`.
+**This API is read-only for content.** Schedules, announcements, notice posts, and weekly vision are created/edited/deleted **directly in the DB by the LMS** — the Staff API's write routes (`POST/PUT/DELETE` on `/schedule`, `/announcements`, `/bulletin`) were **removed**; only `GET` remains. The one content-mutating endpoint is `POST /notifications/send` (admin JWT or LMS `X-API-Key`). Per-user self-service writes remain: `PATCH /users/me` (profile), `POST /users/me/password`, and **`/pto` (2026-09 — 본인 dayoff/personal/other 행을 `t_schedule`에 직접 생성/수정/삭제, 아래 PTO 섹션)**. PTO는 "본인 행 + PTO 타입 + 오늘(ET) 이후"로 서버가 범위를 제한하는 자가 서비스이며, 그 외 `t_schedule` 쓰기는 여전히 LMS 전용이다.
 
 **The `/bulletin` read endpoints were also removed (2026-07, security):** they read the **same `t_noticeboard` table** as `/notices` but applied **no branch (`bid`) filter**, so any staff user could read another branch's notices via `GET /bulletin/{id}` — a cross-branch IDOR that bypassed the exact protection `/notices` adds. `/notices` (branch-scoped, IDOR-safe) fully replaces it and the app only ever used `/notices`. The `BulletinPost` model (`app/models/bulletin.py`) is **kept** — `notice_service` maps it to `t_noticeboard`; only the bulletin controller/service/schema and its router registration were deleted.
 
@@ -181,15 +181,33 @@ Read-only "Notice" feature over `t_noticeboard` — the **same table** the "bull
 
 ## Holidays & Attendance Calendar
 
-Read-only holiday feed over `t_datelist` + holiday/dayoff-aware attendance views. Code: `app/models/datelist.py`, `app/services/holiday_service.py`, `app/controllers/holidays.py`, calendar/day-info logic in `attendance_service`.
+Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일) + holiday/dayoff-aware attendance views. Code: `app/models/datelist.py`, `app/models/holiday.py`, `app/services/holiday_service.py`, `app/controllers/holidays.py`, calendar/day-info logic in `attendance_service`.
 
-- `GET /api/v1/holidays?from_date&to_date` (auth: `get_current_user`) — holidays visible to the caller: `bid IS NULL` (all branches) **or** `bid LIKE '%"<user.bid>"%'`. Defaults to the current month (ET).
+- `GET /api/v1/holidays?from_date&to_date` (auth: `get_current_user`) — 공휴일(전 지점) + 내 지점(`t_holiday.bid = user.bid`) 휴일 병합. Defaults to the current month (ET).
 - `GET /api/v1/attendance/calendar?year&month` — every day of the month with merged status: `worked` (attendance record exists — holiday name still included alongside, "휴일 근무") → `holiday` → `dayoff` → `none`, plus a `summary` (worked/holiday/dayoff day counts). Defaults to the current month (ET).
 - `GET /api/v1/attendance/today` — now also returns `day_info` (`is_holiday`, `holiday_name`, `is_day_off`, all-day vs partial + `stime`/`etime`) — additive, old clients unaffected.
-- Dayoffs come from the user's own `t_schedule` (via `t_user.tid`) where `eventtype ∈ DAYOFF_EVENT_TYPES` (`app/core/constants.py`, currently `{"dayoff"}` — extend as the LMS confirms more non-working types). Multi-day spans are expanded per-day; partial dayoffs (`allday='N'` with `stime`/`etime`) are flagged as non-all-day.
+- Dayoffs come from the user's own `t_schedule` (`tid = t_user.id`, see DB Notes) where `eventtype ∈ DAYOFF_EVENT_TYPES` (`app/core/constants.py`, currently `{"dayoff"}` — extend as the LMS confirms more non-working types). Multi-day spans are expanded per-day; partial dayoffs (`allday='N'` with `stime`/`etime`) are flagged as non-all-day.
 - Holidays never block scans (`/scan`, `/manual`) — holiday work is recorded normally and shown as worked + holiday name.
-- Weekends are **not** hardcoded as off — branches have different working days; only `t_datelist`/`t_schedule` decide.
-- `dev_seed.sql` (repo root) has local-only sample data: 2026 federal holidays, branch-holiday examples, dayoff schedules. Never run it in production.
+- Weekends are **not** hardcoded as off — branches have different working days; only `t_datelist`/`t_holiday`/`t_schedule` decide.
+- `dev_seed.sql` (repo root) has local-only sample data: 2026 federal holidays, `t_holiday` branch examples, dayoff schedules. Never run it in production.
+
+## PTO (Paid Time Off) — 자가 제출 (2026-09-05)
+
+직원이 앱에서 본인 개인 일정(`dayoff`=유급휴가, `personal`, `other`)을 **승인 절차 없이** 직접 제출한다 (구두 승인 후 본인 입력 — LMS Staff Schedule과 동일 기능). 쓰는 테이블은 `t_schedule`, 배정 일수는 `t_vacation`(HR이 LMS Staff Vacation에서 입력, 앱은 읽기만). Code: `app/services/pto_service.py`, `app/controllers/pto.py`, `app/schemas/pto.py`, `app/models/vacation.py`, 상수 `PTO_EVENT_TYPES`/`WORK_START`/`HALF_AM`/`HALF_PM` in `constants.py`.
+
+**Endpoints** (`/api/v1/pto`, auth: `get_current_user`):
+- `GET ?year=` — 해당 연도(기본 올해 ET) 내 PTO 목록 + `balance` `{assigned, used, remaining, from_date, to_date}`. 항목마다 `mode`(`allday|am|pm|custom`), `days`(사용일수), `editable`(`date >= 오늘 ET`).
+- `POST` `{eventtype, eventname, days:[{date, mode, stime?, etime?}]}` — **여러 날 = 하루 1행씩** 생성(최대 31일, 날짜 중복 불가). `tid = uid = wid = 본인 id`, `ins_date/upd_date = now_et()`. 201 + 생성된 항목 배열.
+- `PATCH /{schid}` — 타입/메모/날짜/모드 수정. `DELETE /{schid}`.
+
+**정책 (오너 확정 2026-09-05 — 재검토 금지):**
+- **과거 날짜(`sdate < 오늘 ET`)는 역할 무관 앱에서 생성·수정·삭제 전부 403** ("Past entries can only be changed in the LMS"). 오늘 당일은 허용. LMS의 "권한 있으면 과거 수정" 예외는 앱에 두지 않는다 — `user_role`이 자유 텍스트라 서버가 관리자를 판별할 수 없고, 과거 수정은 HR 성격이라 LMS 감사 하에 둔다.
+- **잔여 초과는 경고만** (`remaining`이 음수가 될 수 있음) — 서버는 차단하지 않는다.
+- **같은 날 같은 타입 중복은 409** (dayoff 이중 집계 방지; 레거시 스팬 행도 포함 판정). dayoff + personal 같은 날은 허용.
+- **주말·휴일 자동 제외 안 함** — LMS도 토·일 dayoff를 그대로 저장. 앱이 표시만 한다.
+- 본인 행이 아니거나 PTO 타입이 아니면 404 (class 행 등은 절대 수정 불가). 휴가여도 `/scan`은 그대로 동작(초과근무 등).
+
+**사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). `dayoff`만 합산, 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. `assigned` = `t_vacation.vacationday WHERE userid=본인 AND ayear='<년>'`(char), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
 
 ## Daily Log / Task Report
 
@@ -216,11 +234,20 @@ The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABA
 
 `t_user.id` is stored in the JWT `sub` claim. **`t_usertimecheck.wid` stores `t_user.id`** (the PK, not the employee number). `t_user.bid` is the branch/location ID. Note: the notice **read** path (`usp_selnoticeboard`/`usp_selnoticedetail`, `notice_service`) treats `t_noticeboard.wid` as `t_user.id` (author). Since the Staff API no longer writes notices (the LMS writes them directly to the DB), the LMS must set `wid = t_user.id` for "noticed by" to resolve correctly.
 
-**`wid` naming trap:** `wid` means different things per table. `t_usertimecheck.wid` = `t_user.id` (subject). `t_noticeboard.wid` = `t_user.id` (author). `t_schedule.wid` = **writer** `t_user.id` (who entered the row — NOT the schedule's subject; the subject is `tid` for teachers or `uid` for staff). `t_user.wid` is the **registrar's** `t_user.id` (who registered the account — confirmed by the owner 2026-07-22), not an employee number — many accounts share the same value. It plays no role in attendance/QR.
+**`wid` naming trap:** `wid` means different things per table. `t_usertimecheck.wid` = `t_user.id` (subject). `t_noticeboard.wid` = `t_user.id` (author). `t_schedule.wid` = **writer** `t_user.id` (who entered the row — NOT the schedule's subject; the subject is `tid`, see Schedule below). `t_user.wid` is the **registrar's** `t_user.id` (who registered the account — confirmed by the owner 2026-07-22), not an employee number — many accounts share the same value. It plays no role in attendance/QR.
 
-**Schedule (`t_schedule`):** two subject keys (2026-07 schema change: `tid` became nullable, `uid` added). Teacher schedules use `tid` (`t_teacher.tid`, linked from `t_user.tid`); non-teacher staff schedules use `uid` (= `t_user.id`) with `tid=NULL`. `schedule_service` matches `uid = user.id OR tid = user.tid` (tid clause skipped when the user has no tid). LMS write rule: teacher event → set `tid`; staff event → `tid=NULL, uid=t_user.id`; `wid` = writer in both cases. Events can span dates (`sdate`~`edate`, `edate` may be NULL for single-day); range queries must use overlap logic (`sdate <= to AND COALESCE(edate, sdate) >= from`), not `sdate BETWEEN`. `eventtype` values seen: `class`, `tutor`, `dayoff`, `other`. Dayoffs can be partial-day (`stime`/`etime` set, `allday='N'`).
+**Schedule (`t_schedule`) — 2026-09-05 오너 확인으로 의미 정정 (7월 문서는 틀렸었다):**
+- **`tid` = 처리 대상.** LMS Staff Schedule(직원 PTO: `dayoff`/`personal`/`other`)은 `tid = t_user.id`를 쓴다. 티처 수업 일정(`class`/`tutor`)은 `tid = t_teacher.tid`(`t_user.tid`로 연결).
+- **`uid` = 로그인 사용자(작성자), `wid` = 작성자.** 둘 다 대상이 아니다. 관리자가 대신 입력하면 `tid=대상, uid=wid=관리자`. 7월에 `uid`를 "직원 일정 대상"으로 쓰기로 했던 규칙은 LMS가 채택하지 않았다 — **`uid`로 매칭하면 관리자가 대신 넣은 타인 일정이 관리자 본인 것으로 보인다.**
+- `schedule_service.subject_filter`: PTO 3종은 `tid = user.id`, 그 외 유형은 `tid = user.tid`(tid 없으면 생략). `uid`는 매칭에 쓰지 않음.
+- **티처는 당분간 배제 (2026-09-05):** 티처는 앱을 쓰지 않고(푸시 토큰 없음) 수업은 `t_tutorschedule`(앱 미조회)에서 관리. `t_teacher.tid`와 `t_user.id`의 숫자 범위 겹침(1~263 vs 2~), Instructor 화면에서 넣은 티처 dayoff 행의 오귀속은 수용된 한계 — 재보고 금지.
+- **LMS 저장 형식 (앱 제출도 동일):** 하루 1행(`sdate = edate`), 종일 `08:00–17:00 / allday Y / halfday N`, 오전 반차 `08:00–12:00 / N / halfday A`, 오후 반차 `13:00–17:00 / N / halfday P`, 시간 지정 `임의 / N / N`. 메모 없으면 `eventname=''`. `halfday`는 프로덕션에 있던 컬럼(로컬은 2026-09-05 추가).
+- Events can span dates (`sdate`~`edate`, `edate` may be NULL for single-day) in legacy rows; range queries must use overlap logic (`sdate <= to AND COALESCE(edate, sdate) >= from`), not `sdate BETWEEN`.
 
-**Holidays (`t_datelist`):** date-dimension table, one row per calendar date (PK `sdate`, range 2014–2030), columns `weekday`, `holidayyn` CHAR(1), `holidaynm`, `bid` (added in `changelog.sql` 2026-07-09). `bid` is a JSON-array **string** in the same format as `t_invoiceitem.bid` (e.g. `'["6","7","4"]'`, values are stringified `t_branch.bid`): `NULL` = holiday for **all** branches (national holidays), array = only those branches (e.g. branch founding day). Branch match uses `bid LIKE '%"<bid>"%'` — the quotes prevent `"2"` from matching `"12"`; don't use `JSON_CONTAINS` (a malformed row would raise). Because PK is `sdate` and every date row already exists, LMS updates must use `INSERT ... ON DUPLICATE KEY UPDATE` — `INSERT IGNORE` silently skips existing dates. One row per date ⇒ a date can carry only **one** holiday name/bid set (a global and a branch holiday can't coexist on the same date). Holiday flags are maintained per-year by the LMS (US federal holidays); verify the current year is populated before relying on it.
+**Holidays — two tables, merged by `holiday_service.get_holidays` (2026-09-05 오너 확인):**
+- **`t_datelist`** = 기본 달력(날짜당 1행, PK `sdate`, 2014–2030, `weekday`) + **공휴일**(`holidayyn='Y'`, `holidaynm`, 예: `2026-07-03 FRIDAY Y Independence Day`). 전 지점 공통. `bid` 컬럼(2026-07-09 추가, JSON 문자열 설계)은 **LMS가 채택하지 않아 프로덕션 전부 NULL — 필터에 쓰지 않는다** (컬럼은 남아 있음, 드롭 가능). LMS updates must use `INSERT ... ON DUPLICATE KEY UPDATE` (PK `sdate` 행이 이미 존재).
+- **`t_holiday`** (`app/models/holiday.py`, `BranchHoliday`) = **지점별** 행사/지역 휴일 (LMS Staff Schedule > Manage Holidays). `bid` int(행당 지점 1개), `holidayyn`, `holidaynm`. 로그인 사용자의 `t_user.bid`와 같은 행만 읽는다.
+- 같은 날짜에 둘 다 있으면 공휴일 이름 우선. 서비스는 `Holiday(sdate, holidaynm)` dataclass 리스트를 반환.
 
 **Soft deletes:** legacy tables use a `del_yn` / `delyn` CHAR(1) column (`'N'` = active, `'Y'` = deleted). Services must filter `del_yn = 'N'` on reads. Newer tables (e.g. `t_weekly_vision`) use `is_hidden` instead.
 
@@ -235,3 +262,4 @@ No test suite exists yet. `tests/` contains only `__init__.py`.
 `app/core/constants.py` holds app-wide constants. Currently:
 - `APP_TZ` — `ZoneInfo("America/New_York")` (Eastern Time, covers NY and GA locations)
 - `DAYOFF_EVENT_TYPES` — `t_schedule.eventtype` values treated as "not working" for attendance views (currently `{"dayoff"}`)
+- `PTO_EVENT_TYPES` — 앱에서 자가 제출 가능한 유형 `{"dayoff","personal","other"}`; `WORK_START/WORK_END/HALF_AM/HALF_PM/WORK_HOURS` — 근무 08–17, 반차 08–12 / 13–17 (LMS 저장값과 동일해야 함)

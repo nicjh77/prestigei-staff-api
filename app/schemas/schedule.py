@@ -10,13 +10,14 @@ _TIME = dict(pattern=r"^\d{2}:\d{2}$", max_length=5)
 class ScheduleOut(BaseModel):
     schid: int
     tid: int | None
-    uid: int | None       # 일반 직원 일정 대상 (t_user.id)
+    uid: int | None       # 작성자 (대상 아님)
     wid: int | None       # 작성자 (대상 아님)
     sdate: date | None
     edate: date | None
     stime: str | None
     etime: str | None
     allday: str
+    halfday: str | None   # N / A(오전 반차) / P(오후 반차)
     eventname: str | None
     eventtype: str | None
 

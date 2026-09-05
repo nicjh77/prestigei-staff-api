@@ -11,7 +11,7 @@ from app.models.user import User
 from app.schemas.holiday import HolidayOut
 from app.services import holiday_service
 
-# 읽기 전용: 휴일 데이터는 LMS가 t_datelist에 직접 관리. 이 API는 조회만 제공.
+# 읽기 전용: 휴일 데이터는 LMS가 t_datelist(공휴일)·t_holiday(지점) 에 직접 관리. 이 API는 조회만 제공.
 router = APIRouter(tags=["Holidays"])
 
 
@@ -31,6 +31,6 @@ async def list_holidays(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """기간 내 휴일 목록 — 전 지점 공통 + 내 지점 휴일 (기본: 이번 달)"""
+    """기간 내 휴일 목록 — 공휴일(t_datelist) + 내 지점 휴일(t_holiday) 병합 (기본: 이번 달)"""
     holidays = await holiday_service.get_holidays(db, current_user.bid, from_date, to_date)
     return [HolidayOut(date=h.sdate, name=h.holidaynm) for h in holidays]

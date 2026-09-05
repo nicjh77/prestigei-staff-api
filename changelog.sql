@@ -142,3 +142,35 @@ ALTER TABLE `t_datelist`
 
 -- 참고 (스키마 변경 아님): 같은 배포에서 t_usertimecheck는 "하루 여러 in/out 행" 방식으로
 -- 전환됨 (LMS와 동일). 컬럼 변경 없음 — 서버 로직만 변경 (3번째 스캔 409 → 새 행 체크인).
+
+
+-- =============================================
+-- 2026-09-05  PTO 기능 — LMS 소유 테이블 기록 (프로덕션에 이미 존재, Staff API는 참조만)
+-- =============================================
+-- 프로덕션에서 export 받아 로컬에 적용 완료 (2026-09-05). 아래는 기록용 DDL.
+-- t_schedule.halfday: 프로덕션에 존재하던 컬럼 — 로컬은 2026-09-05 수동 추가:
+--   ALTER TABLE `t_schedule` ADD COLUMN `halfday` char(1) DEFAULT 'N' AFTER `allday`;
+--
+-- t_holiday — 지점별 휴일 (LMS "Manage Holidays"). bid는 int (t_branch.bid). t_datelist.bid(JSON 문자열)와는 별개.
+-- CREATE TABLE IF NOT EXISTS `t_holiday` (
+--   `id` int NOT NULL AUTO_INCREMENT,
+--   `sdate` date NOT NULL,
+--   `bid` int NOT NULL,
+--   `holidayyn` char(1) DEFAULT 'N',
+--   `holidaynm` varchar(255) DEFAULT NULL,
+--   PRIMARY KEY (`id`), KEY `id_sdate` (`sdate`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
+--
+-- t_vacation — 개인별 연도별 배정 휴가 일수 (HR이 LMS Staff Vacation에서 입력). ayear는 char(4).
+-- CREATE TABLE IF NOT EXISTS `t_vacation` (
+--   `id` int NOT NULL AUTO_INCREMENT,
+--   `userid` int DEFAULT NULL,            -- t_user.id
+--   `ayear` char(4) DEFAULT NULL,
+--   `fromdate` date DEFAULT NULL,
+--   `todate` date DEFAULT NULL,
+--   `vacationday` float DEFAULT NULL,
+--   `added` datetime DEFAULT NULL, `addedby` int DEFAULT NULL,
+--   `updated` datetime DEFAULT NULL, `updatedby` int DEFAULT NULL,
+--   `comment` text,
+--   PRIMARY KEY (`id`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
