@@ -226,6 +226,28 @@ App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied v
 
 **Deployment note:** the API runs behind **Apache2** (`mod_proxy_http`) on Ubuntu (managed by systemd). Apache appends the real client IP to the **end** of `X-Forwarded-For`, so `_client_ip()` reads the **rightmost** value. Using the first value would let a client spoof `X-Forwarded-For` to get a fresh bucket per request and bypass every limit.
 
+## Deployment (프로덕션 서버)
+
+수동 배포 — FileZilla로 변경 파일을 덮어쓰고 서비스를 재시작한다. CI/CD·Docker 없음.
+
+- 경로 `/var/www/staff-app`, systemd 서비스 **`fastapi_staffapp.service`**, 실행 계정 `svc-node`. 서버는 **`.env`** 를 읽는다(`.env.production` 아님 — `APP_ENV` 미설정). 업로드 후 파일 소유권이 `svc-node`로 유지되는지 확인.
+- 명령:
+  ```bash
+  systemctl list-units --type=service | grep -i staff   # 서비스 찾기
+  sudo systemctl status fastapi_staffapp
+  sudo systemctl restart fastapi_staffapp                # 파일 덮어쓴 뒤 필수 (--reload 아님)
+  sudo journalctl -u fastapi_staffapp -n 50 -f
+  ```
+- 재시작은 1~2초 끊김. **푸시 발송 직후는 피할 것** — dispatch 백그라운드 작업이 죽으면 `t_notification_log`가 `pending`으로 남는다.
+- `pip install -r requirements.txt`는 `requirements.txt`가 바뀐 배포에서만. DB 변경은 `changelog.sql`을 프로덕션 MySQL에서 수동 실행(파일 업로드로는 마이그레이션되지 않음).
+- 서버 `.env`를 로컬 env 파일로 덮어쓰지 말 것.
+
+**2026-09-05 PTO 배포 체크리스트 (코드만 — DB·패키지·main.py 변경 없음):**
+- 신규 5: `app/controllers/pto.py`, `app/models/holiday.py`, `app/models/vacation.py`, `app/schemas/pto.py`, `app/services/pto_service.py`
+- 수정 7: `app/controllers/holidays.py`, `app/core/constants.py`, `app/core/router.py`, `app/models/schedule.py`, `app/schemas/schedule.py`, `app/services/holiday_service.py`, `app/services/schedule_service.py`
+- 배포 시 기존 앱(1.3.0)에 보이는 변화: 관리자가 대신 넣은 dayoff가 본인에게 보이기 시작(입력한 관리자 화면에서는 사라짐), `/holidays`에 `t_holiday` 지점 휴일 추가, `/schedule`에 `halfday` 필드 추가(구 앱은 무시).
+- 앱은 서버 배포 **후** 빌드/OTA (preview 프로필 env가 프로덕션 API).
+
 ## DB Notes
 
 Alembic is not used — models are written to match existing DB tables directly.

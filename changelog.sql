@@ -148,6 +148,8 @@ ALTER TABLE `t_datelist`
 -- 2026-09-05  PTO 기능 — LMS 소유 테이블 기록 (프로덕션에 이미 존재, Staff API는 참조만)
 -- =============================================
 -- 프로덕션에서 export 받아 로컬에 적용 완료 (2026-09-05). 아래는 기록용 DDL.
+-- ⚠️ 이 배포는 DB 변경 없음 (코드만). 프로덕션 t_schedule.halfday·t_holiday·t_vacation 이미 존재 확인 (2026-09-05).
+-- 서버 코드 커밋 f627e81 — 프로덕션 업로드/재시작은 수동 (CLAUDE.md Deployment 참조).
 -- t_schedule.halfday: 프로덕션에 존재하던 컬럼 — 로컬은 2026-09-05 수동 추가:
 --   ALTER TABLE `t_schedule` ADD COLUMN `halfday` char(1) DEFAULT 'N' AFTER `allday`;
 --
