@@ -206,6 +206,7 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 - **같은 날 같은 타입 중복은 409** (dayoff 이중 집계 방지; 레거시 스팬 행도 포함 판정). dayoff + personal 같은 날은 허용.
 - **주말·휴일 자동 제외 안 함** — LMS도 토·일 dayoff를 그대로 저장. 앱이 표시만 한다.
 - 본인 행이 아니거나 PTO 타입이 아니면 404 (class 행 등은 절대 수정 불가). 휴가여도 `/scan`은 그대로 동작(초과근무 등).
+- **추가 확정 (2026-09-05 오너):** 삭제는 하루 단위(일괄 삭제 없음 — 행이 하루 1행이라 LMS와 동일) / **관리자가 대신 입력한 미래 PTO도 본인이 수정·삭제 가능**(`tid = 본인`이면 본인 행; `wid`는 보지 않음) / 주말·휴일 자동 제외 없음(앱 일자 행에서 ✕로 제외) / 한 번 제출 = 타입·메모 하나, 중복 시 요청 전체 409(부분 저장 없음).
 
 **사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). `dayoff`만 합산, 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. `assigned` = `t_vacation.vacationday WHERE userid=본인 AND ayear='<년>'`(char), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
 
