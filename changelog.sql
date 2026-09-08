@@ -198,3 +198,20 @@ ALTER TABLE `t_push_token`
 -- SELECT u.loginid, t.platform, t.app_version, t.build_number, t.ota, t.device_model, t.os_version, t.last_seen_at, t.is_active,
 --        CASE WHEN t.push_token LIKE 'Expo%' THEN 'expo' ELSE 'fcm' END AS token_kind
 -- FROM t_push_token t JOIN t_user u ON u.id = t.user_id ORDER BY t.last_seen_at DESC;
+
+
+-- =============================================
+-- 2026-09-08  t_push_token 같은 폰 잔여 행 정리 (일회성) — 이후는 서버가 토큰 등록 때 자동 비활성화
+-- =============================================
+-- device_id에 OS 버전이 들어가 OS 업데이트마다 새 행이 생겼고, 옛 Expo 행/같은 FCM 토큰 행이 활성으로 남아
+-- 같은 폰에 알림이 두 번 갔다. 아래는 기존 데이터 정리 (신규 등록부터는 notification_service.register_token이 처리).
+UPDATE t_push_token e
+JOIN t_push_token f
+  ON f.user_id = e.user_id AND f.platform = e.platform AND f.id <> e.id AND f.is_active = 1
+ AND f.last_seen_at IS NOT NULL                                  -- 새 코드로 등록된(최근 실행) 행을 기준으로
+ AND (e.push_token LIKE 'Expo%'                                  -- ① 구버전 Expo 토큰
+      OR e.push_token = f.push_token                             -- ② 같은 토큰 중복
+      OR SUBSTRING_INDEX(e.device_id, '_', 2) = SUBSTRING_INDEX(f.device_id, '_', 2))  -- ③ 같은 기종·OS, 다른 OS 버전
+SET e.is_active = 0
+WHERE e.is_active = 1 AND e.last_seen_at IS NULL;
+-- 확인: SELECT user_id, device_id, LEFT(push_token,18), is_active, last_seen_at FROM t_push_token ORDER BY user_id, is_active DESC;

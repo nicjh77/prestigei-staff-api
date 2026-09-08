@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 
 import anyio
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,29 @@ async def register_token(db: AsyncSession, user: User, data: PushTokenRegister) 
             user_id=user.id, push_token=data.push_token, device_id=data.device_id, platform=data.platform,
             last_seen_at=now_et(), **state,
         ))
+
+    # 같은 폰의 잔여 행 비활성화 (2026-09-08). device_id = "{기종}_{OS}_{OS버전}" 이라 OS 업데이트마다 새 행이 생기고,
+    # 옛 행(Expo 토큰이거나 같은 FCM 토큰)이 is_active로 남아 같은 폰에 알림이 두 번 갔다(8월에 실제 관측).
+    # 대상: 같은 사용자·플랫폼의 다른 활성 행 중 ① Expo 토큰(구버전 앱 잔재) ② 같은 push_token(정확한 중복)
+    # ③ device_id 접두("{기종}_{OS}_")가 같은 행(= 같은 기종의 다른 OS 버전). 다른 기종의 두 번째 폰은 건드리지 않는다.
+    prefix = data.device_id.rsplit("_", 1)[0] + "_" if "_" in data.device_id else None
+    conds = [
+        PushToken.push_token.like("Expo%"),
+        PushToken.push_token == data.push_token,
+    ]
+    if prefix:
+        conds.append(PushToken.device_id.like(prefix.replace("%", r"\%").replace("_", r"\_") + "%"))
+    await db.execute(
+        update(PushToken)
+        .where(
+            PushToken.user_id == user.id,
+            PushToken.platform == data.platform,
+            PushToken.device_id != data.device_id,
+            PushToken.is_active == True,  # noqa: E712
+            or_(*conds),
+        )
+        .values(is_active=False)
+    )
 
 
 async def deregister_token(db: AsyncSession, user: User, device_id: str) -> None:
@@ -119,7 +142,8 @@ async def dispatch_notification(
             )
             if user_ids is not None:
                 query = query.where(PushToken.user_id.in_(user_ids))
-            tokens = [row[0] for row in (await session.execute(query)).all()]
+            # 같은 토큰이 여러 행에 있어도 한 번만 보낸다 (중복 행 → 이중 수신 방지)
+            tokens = list(dict.fromkeys(row[0] for row in (await session.execute(query)).all()))
 
         # 2) 푸시 발송 — DB 커넥션을 잡지 않은 상태로 외부 HTTP 수행
         invalid_tokens: list[str] = []
