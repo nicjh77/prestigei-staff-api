@@ -248,6 +248,8 @@ App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied v
 - 수정 7: `app/controllers/holidays.py`, `app/core/constants.py`, `app/core/router.py`, `app/models/schedule.py`, `app/schemas/schedule.py`, `app/services/holiday_service.py`, `app/services/schedule_service.py`
 - 배포 시 기존 앱(1.3.0)에 보이는 변화: 관리자가 대신 넣은 dayoff가 본인에게 보이기 시작(입력한 관리자 화면에서는 사라짐), `/holidays`에 `t_holiday` 지점 휴일 추가, `/schedule`에 `halfday` 필드 추가(구 앱은 무시).
 - 앱은 서버 배포 **후** 빌드/OTA (preview 프로필 env가 프로덕션 API).
+- **업로드는 커밋 `539f5f0`(2026-09-05, dayoff 휴일 자동 제외) 이후 상태로** — 위 12개 파일 목록은 그대로지만 `pto_service.py`/`schemas/pto.py`/`controllers/pto.py`가 그 커밋에서 다시 바뀌었다(POST 응답이 `{items, skipped}`). 이전 커밋 파일을 올리면 앱의 제출 결과 처리가 어긋난다.
+- 릴리스 상태 (2026-09-08): 앱은 preview APK(preview 채널)로 내부 테스트 중, 피드백 반영은 `eas update --branch preview`. 확인 끝나면 `--branch production`으로 전 사용자 배포. `version` 1.3.0 유지(JS만 변경).
 
 ## DB Notes
 
