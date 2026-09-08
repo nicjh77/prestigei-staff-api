@@ -254,7 +254,8 @@ App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied v
 - 앱은 서버 배포 **후** 빌드/OTA (preview 프로필 env가 프로덕션 API).
 - **업로드는 커밋 `539f5f0`(2026-09-05, dayoff 휴일 자동 제외) 이후 상태로** — 위 12개 파일 목록은 그대로지만 `pto_service.py`/`schemas/pto.py`/`controllers/pto.py`가 그 커밋에서 다시 바뀌었다(POST 응답이 `{items, skipped}`). 이전 커밋 파일을 올리면 앱의 제출 결과 처리가 어긋난다.
 - **2026-09-08 추가분 — DB 변경 있음:** `changelog.sql`의 `ALTER TABLE t_push_token ADD COLUMN app_version … last_seen_at`을 **서버 코드 배포와 같은 시점에** 프로덕션 MySQL에서 실행(컬럼 없이 새 코드가 뜨면 토큰 등록 500 → 푸시 끊김). 함께 올릴 파일: `app/models/notification.py`, `app/schemas/notification.py`, `app/services/notification_service.py`, `app/controllers/app_info.py`.
-- 릴리스 상태 (2026-09-08): 앱은 preview APK(preview 채널)로 내부 테스트 중, 피드백 반영은 `eas update --branch preview`. 확인 끝나면 `--branch production`으로 전 사용자 배포. `version` 1.3.0 유지(JS만 변경).
+- **릴리스 완료 (2026-09-08):** 서버 코드(PTO + t_push_token 앱 상태 컬럼, ALTER 포함) 프로덕션 배포·재시작 완료, 앱은 `eas update --branch production` 발행 완료 → 1.3.0 전 사용자(iOS·Android) 적용 확인. `version` 1.3.0 유지. 이후 서버 추가분(`f675e71` 상태만 보고, `21000e4` LATEST_BUILD 옵션)은 `app/schemas/notification.py`, `app/services/notification_service.py`, `app/controllers/app_info.py` 재업로드로 반영.
+- 남은 1.2.0 사용자(Expo 토큰 행)는 1.4.0 스토어 배포 때 `MIN_VERSION` 상향으로 정리 예정. 같은 사용자의 Expo/FCM 중복 행(device_id에 OS 버전이 들어가 OS 업데이트마다 새 행)은 **그대로 두기로 함**(오너 2026-09-08) — 정리 SQL은 세션 기록 참조, 자동 비활성화 규칙은 넣지 않음.
 
 ## DB Notes
 

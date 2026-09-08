@@ -183,7 +183,7 @@ ALTER TABLE `t_datelist`
 -- =============================================
 -- 앱이 토큰 등록(POST /notifications/token) 때 버전·빌드·OTA·기기 정보를 함께 보낸다. 구버전 앱은 안 보내므로 NULL 허용.
 -- 서버는 이 값들을 컬럼 폭에 맞춰 잘라 저장한다(거부 안 함 — 긴 os_name이 토큰 등록을 막았던 학생 앱 사례).
--- ⚠️ 프로덕션 MySQL에서 수동 실행 필요 — 서버 코드 배포와 같은 시점 (컬럼 없이 새 코드가 뜨면 토큰 등록이 500).
+-- ✅ 프로덕션 적용 완료 2026-09-08 (서버 재시작과 함께). 아래는 기록용.
 ALTER TABLE `t_push_token`
   ADD COLUMN `app_version`  varchar(20) NULL AFTER `is_active`,     -- "1.3.0"
   ADD COLUMN `build_number` varchar(20) NULL AFTER `app_version`,   -- Android versionCode / iOS buildNumber
