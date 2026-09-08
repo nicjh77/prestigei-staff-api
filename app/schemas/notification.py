@@ -5,7 +5,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PushTokenRegister(BaseModel):
-    push_token: str
+    # push_token 없이 오면 "상태만 보고" (2026-09-08): 권한 거부/토큰 실패 폰도 앱·기기 상태와 last_seen을 남길 수 있게.
+    # 이 경우 기존 (user, device) 행의 상태 컬럼만 갱신하고 토큰/is_active는 건드리지 않는다. 행이 없으면 무시.
+    push_token: str | None = None
     device_id: str
     platform: Literal["ios", "android"]
     # 앱/기기 상태 (2026-09-08, optional — 구버전 앱은 안 보냄; 학생 앱과 같은 필드명·폭).

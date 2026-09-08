@@ -34,6 +34,13 @@ async def register_token(db: AsyncSession, user: User, data: PushTokenRegister) 
         app_version=data.app_version, build_number=data.build_number, ota=data.ota, update_id=data.update_id,
         device_model=data.device_model, os_name=data.os_name, os_version=data.os_version,
     ).items() if v is not None}
+    if data.push_token is None:
+        # 상태만 보고 — 토큰을 못 구한 폰. 기존 행이 있으면 상태·last_seen만 갱신 (토큰·is_active 유지)
+        if existing:
+            for k, v in state.items():
+                setattr(existing, k, v)
+            existing.last_seen_at = now_et()
+        return
     if existing:
         existing.push_token = data.push_token
         existing.platform = data.platform
