@@ -166,7 +166,7 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 
 ## App version check
 
-`GET /api/v1/app/version-check?platform&current` (no auth, `app/controllers/app_info.py`) → `{min_version, force_update, latest_version, store_update_available}`. `MIN_VERSION` = 이 미만이면 앱이 "Update Required" 강제 안내(스토어 라이브 확인 후에만 올릴 것). `LATEST_VERSION`(2026-09-08 추가) = 스토어 최신 버전 — 앱 Profile > About "Check for updates"가 OTA가 없을 때 "스토어에 새 버전 있음"을 안내하는 데 씀(강제 아님). **스토어 릴리스 때마다 `LATEST_VERSION`을 올려야** 안내가 맞다.
+`GET /api/v1/app/version-check?platform&current` (no auth, `app/controllers/app_info.py`) → `{min_version, force_update, latest_version, store_update_available}`. `MIN_VERSION` = 이 미만이면 앱이 "Update Required" 강제 안내(스토어 라이브 확인 후에만 올릴 것). `LATEST_VERSION`(2026-09-08 추가) = 스토어 최신 버전 — 앱 Profile > About "Check for updates"가 OTA가 없을 때 "스토어에 새 버전 있음"을 안내하는 데 씀(강제 아님). **스토어 릴리스 때마다 `LATEST_VERSION`을 올려야** 안내가 맞다. `LATEST_BUILD = {"android": None, "ios": None}` — 같은 버전의 재빌드(예: 2.0.0 빌드 1·2·3 내부 테스트)까지 안내하려면 플랫폼별 최신 빌드 번호를 채운다(None = 빌드 비교 안 함). 앱이 `build` 파라미터를 보내며, 버전이 같고 빌드가 낮으면 `store_update_available=true`. 응답에 `latest_build` 포함.
 
 ## Notice Board (Notice)
 
