@@ -7,6 +7,9 @@ router = APIRouter(tags=["App"])
 # 토큰 만료 시 복구 불가이므로, 같은 배포에 이 값이 1.2.0이어야 강제 업데이트가 뜬다.
 # (전제: 스토어에 1.2.0이 먼저 공개되어 있을 것)
 MIN_VERSION = "1.2.0"
+# 스토어에 공개된 최신 버전 — 앱 Profile > About "Check for updates"가 "스토어에 새 버전 있음" 안내에 사용.
+# 강제는 아님(MIN_VERSION과 별개). 스토어 릴리스 때마다 올린다.
+LATEST_VERSION = "1.3.0"
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
@@ -24,7 +27,14 @@ def version_check(
     except Exception:
         force = False
 
+    try:
+        store_update = _parse_version(current) < _parse_version(LATEST_VERSION)
+    except Exception:
+        store_update = False
+
     return {
         "min_version": MIN_VERSION,
         "force_update": force,
+        "latest_version": LATEST_VERSION,       # additive (2026-09-08)
+        "store_update_available": store_update,
     }

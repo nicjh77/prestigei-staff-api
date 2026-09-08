@@ -176,3 +176,25 @@ ALTER TABLE `t_datelist`
 --   `comment` text,
 --   PRIMARY KEY (`id`)
 -- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- =============================================
+-- 2026-09-08  t_push_token 앱/기기 상태 컬럼 (Profile > About / 사용자 앱 버전 파악) — 학생 앱과 같은 구성
+-- =============================================
+-- 앱이 토큰 등록(POST /notifications/token) 때 버전·빌드·OTA·기기 정보를 함께 보낸다. 구버전 앱은 안 보내므로 NULL 허용.
+-- 서버는 이 값들을 컬럼 폭에 맞춰 잘라 저장한다(거부 안 함 — 긴 os_name이 토큰 등록을 막았던 학생 앱 사례).
+-- ⚠️ 프로덕션 MySQL에서 수동 실행 필요 — 서버 코드 배포와 같은 시점 (컬럼 없이 새 코드가 뜨면 토큰 등록이 500).
+ALTER TABLE `t_push_token`
+  ADD COLUMN `app_version`  varchar(20) NULL AFTER `is_active`,     -- "1.3.0"
+  ADD COLUMN `build_number` varchar(20) NULL AFTER `app_version`,   -- Android versionCode / iOS buildNumber
+  ADD COLUMN `ota`          varchar(32) NULL AFTER `build_number`,  -- 'embedded' | 'YYYYMMDD-HHMM' (실행 중 OTA의 ET 발행시각)
+  ADD COLUMN `update_id`    varchar(40) NULL AFTER `ota`,           -- expo-updates updateId (OTA일 때만)
+  ADD COLUMN `device_model` varchar(80) NULL AFTER `update_id`,
+  ADD COLUMN `os_name`      varchar(20) NULL AFTER `device_model`,
+  ADD COLUMN `os_version`   varchar(30) NULL AFTER `os_name`,
+  ADD COLUMN `last_seen_at` datetime    NULL AFTER `os_version`;    -- 마지막 토큰 등록(앱 실행) 시각, ET 벽시계
+
+-- 확인용: 사용자별 앱 상태
+-- SELECT u.loginid, t.platform, t.app_version, t.build_number, t.ota, t.device_model, t.os_version, t.last_seen_at, t.is_active,
+--        CASE WHEN t.push_token LIKE 'Expo%' THEN 'expo' ELSE 'fcm' END AS token_kind
+-- FROM t_push_token t JOIN t_user u ON u.id = t.user_id ORDER BY t.last_seen_at DESC;

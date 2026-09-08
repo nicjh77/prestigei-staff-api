@@ -132,7 +132,7 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 **부팅 안전성 (중요):** `firebase_admin`은 **절대 모듈 최상단에서 import하지 않는다.** `push.py`가 실제 발송 시점에 함수 안에서 import하고, `fcm_push._get_app()`이 자격증명을 그때 처음 읽는다. 서비스 계정 키가 없거나 경로가 틀려도 **서버는 정상 부팅하고 그 발송만 실패**한다 — 최상단 import로 바꾸면 키 파일 하나 빠졌을 때 앱 전체가 안 떠서 로그인 불가가 된다 (수동 FileZilla 배포라 충분히 있을 수 있는 사고). 자격증명 오류로는 토큰을 비활성화하지 않는다(영구 무효 코드만 비활성화).
 
 **Endpoints** (under `/api/v1/notifications`):
-- `POST /token` — register/refresh the caller's Expo push token (auth: `get_current_user`). Upsert keyed on `(user_id, device_id)`; re-registering reactivates and updates the token.
+- `POST /token` — register/refresh the caller's push token (auth: `get_current_user`). Upsert keyed on `(user_id, device_id)`; re-registering reactivates and updates the token. **앱/기기 상태 동봉 (2026-09-08, 학생 앱과 같은 필드):** `app_version`, `build_number`, `ota`('embedded' | 'YYYYMMDD-HHMM' ET 발행시각), `update_id`, `device_model`, `os_name`, `os_version` — 전부 optional(구버전 앱은 안 보냄, 보낸 것만 갱신) + `last_seen_at = now_et()`. **값은 컬럼 폭에 맞춰 잘라 저장하고 절대 422로 거부하지 않는다** — 참고용 값이 토큰 등록을 막으면 푸시가 끊긴다(긴 `os_name`이 등록을 막았던 학생 앱 사례). 사용자별 앱 상태 조회 SQL은 `changelog.sql` 2026-09-08 항목.
 - `DELETE /token?device_id=...` — deactivate the caller's token for that device (sets `is_active = False`; not a hard delete).
 - `POST /send` — send a notification (auth: `require_admin_or_api_key` — admin JWT or `X-API-Key` header). `user_ids` list → target those users; `user_ids` omitted/null → broadcast to all. Creates `t_notification_recipient` records for read/unread tracking.
 - `GET ` (no trailing slash) — paginated notification list for current user (auth: `get_current_user`). Returns `items`, `total`, `unread_count`. Route is registered as `@router.get("")` (not `"/"`) so it responds at `/api/v1/notifications` without a 307 trailing-slash redirect — mobile clients drop the auth header/query on redirect. All list routes in this codebase use `""`, not `"/"`.
@@ -140,7 +140,7 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 - `PATCH /{recipient_id}/read` — mark a single notification as read.
 - `PATCH /read-all` — mark all notifications as read for current user.
 
-**Tables** (`t_push_token`, `t_notification_log`, `t_notification_recipient`) — created via `changelog.sql`. `t_push_token` has a unique key on `(user_id, device_id)`. `t_notification_recipient` has a unique key on `(notification_id, user_id)` and tracks `is_read`/`read_at` per user. `user_id` is `int` (FK → `t_user.id`); the row PK `id` is `bigint`. The token column is `push_token`; the log column is `push_response`.
+**Tables** (`t_push_token`, `t_notification_log`, `t_notification_recipient`) — created via `changelog.sql`. `t_push_token` has a unique key on `(user_id, device_id)` and, since 2026-09-08, nullable app/device-state columns (`app_version`…`last_seen_at`, see `changelog.sql`). `t_notification_recipient` has a unique key on `(notification_id, user_id)` and tracks `is_read`/`read_at` per user. `user_id` is `int` (FK → `t_user.id`); the row PK `id` is `bigint`. The token column is `push_token`; the log column is `push_response`.
 
 **Send flow** — two phases so the DB connection is never held during the external Expo HTTP call:
 - `notification_service.prepare_notification` (runs in the request transaction, via `get_db`): writes a `t_notification_log` row with `status="pending"` (`db.flush()` to get `log.id`), then creates `t_notification_recipient` rows for each target user. The controller (`POST /send`) then **explicitly `await db.commit()`** and schedules `dispatch_notification` via FastAPI `BackgroundTasks`. **이 명시 커밋은 필수다 (2026-08-11 프로덕션 1205로 확인):** get_db의 자동 커밋(yield 이후)은 백그라운드 태스크가 끝난 **뒤**에 실행되므로, 커밋 없이 add_task하면 dispatch의 상태 UPDATE가 미커밋 INSERT의 행 잠금에 걸려 50초 lock-wait-timeout으로 죽고 로그가 pending에 방치된다. "서비스는 commit 금지" 규칙의 유일한 예외 지점(컨트롤러 레벨).
@@ -163,6 +163,10 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 - `pip install -r requirements.txt` — **`firebase-admin` 추가됨**. 설치 시 `httpx`가 0.27.0 → **0.28.1**로 올라간다(firebase-admin 요구), 그 외 `grpcio`/`protobuf`/`google-cloud-*` 등 전이 의존성이 함께 들어온다. 배포 서버에서 재설치 필요.
 - **`FIREBASE_CREDENTIALS_PATH`** (신규, optional) — Firebase 서비스 계정 JSON 키 경로. 관례: 프로젝트 루트에 `firebase-serviceAccountKey.json`으로 두고 상대 경로로 참조 (로컬/서버 동일, `.gitignore`의 `*.json` 규칙이 커밋을 막는다 — git 히스토리에 올라간 적 없음 확인됨 2026-08-11). **키 파일은 절대 커밋 금지.** 비우면 `GOOGLE_APPLICATION_CREDENTIALS`로 폴백하고, 둘 다 없으면 FCM 발송만 실패한다(서버는 정상 부팅). Firebase 프로젝트는 `prestigei-staff`.
 - Expo 경로는 여전히 자격증명 불필요(공개 엔드포인트).
+
+## App version check
+
+`GET /api/v1/app/version-check?platform&current` (no auth, `app/controllers/app_info.py`) → `{min_version, force_update, latest_version, store_update_available}`. `MIN_VERSION` = 이 미만이면 앱이 "Update Required" 강제 안내(스토어 라이브 확인 후에만 올릴 것). `LATEST_VERSION`(2026-09-08 추가) = 스토어 최신 버전 — 앱 Profile > About "Check for updates"가 OTA가 없을 때 "스토어에 새 버전 있음"을 안내하는 데 씀(강제 아님). **스토어 릴리스 때마다 `LATEST_VERSION`을 올려야** 안내가 맞다.
 
 ## Notice Board (Notice)
 
@@ -249,6 +253,7 @@ App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied v
 - 배포 시 기존 앱(1.3.0)에 보이는 변화: 관리자가 대신 넣은 dayoff가 본인에게 보이기 시작(입력한 관리자 화면에서는 사라짐), `/holidays`에 `t_holiday` 지점 휴일 추가, `/schedule`에 `halfday` 필드 추가(구 앱은 무시).
 - 앱은 서버 배포 **후** 빌드/OTA (preview 프로필 env가 프로덕션 API).
 - **업로드는 커밋 `539f5f0`(2026-09-05, dayoff 휴일 자동 제외) 이후 상태로** — 위 12개 파일 목록은 그대로지만 `pto_service.py`/`schemas/pto.py`/`controllers/pto.py`가 그 커밋에서 다시 바뀌었다(POST 응답이 `{items, skipped}`). 이전 커밋 파일을 올리면 앱의 제출 결과 처리가 어긋난다.
+- **2026-09-08 추가분 — DB 변경 있음:** `changelog.sql`의 `ALTER TABLE t_push_token ADD COLUMN app_version … last_seen_at`을 **서버 코드 배포와 같은 시점에** 프로덕션 MySQL에서 실행(컬럼 없이 새 코드가 뜨면 토큰 등록 500 → 푸시 끊김). 함께 올릴 파일: `app/models/notification.py`, `app/schemas/notification.py`, `app/services/notification_service.py`, `app/controllers/app_info.py`.
 - 릴리스 상태 (2026-09-08): 앱은 preview APK(preview 채널)로 내부 테스트 중, 피드백 반영은 `eas update --branch preview`. 확인 끝나면 `--branch production`으로 전 사용자 배포. `version` 1.3.0 유지(JS만 변경).
 
 ## DB Notes

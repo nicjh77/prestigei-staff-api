@@ -1,13 +1,37 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PushTokenRegister(BaseModel):
     push_token: str
     device_id: str
     platform: Literal["ios", "android"]
+    # 앱/기기 상태 (2026-09-08, optional — 구버전 앱은 안 보냄; 학생 앱과 같은 필드명·폭).
+    # ⚠️ max_length로 거부하지 않는다 — 참고용 값이 토큰 등록을 막으면 안 된다. 실제 Android 폰의 os_name이
+    # 20자를 넘어 등록이 막혔던 이력(학생 앱 2026-09-04) → 컬럼 폭에 맞춰 잘라서 저장.
+    app_version: str | None = None
+    build_number: str | None = None
+    ota: str | None = None            # 'embedded' | 'YYYYMMDD-HHMM'
+    update_id: str | None = None
+    device_model: str | None = None
+    os_name: str | None = None
+    os_version: str | None = None
+
+    _CLIENT_INFO_WIDTHS = {
+        "app_version": 20, "build_number": 20, "ota": 32, "update_id": 40,
+        "device_model": 80, "os_name": 20, "os_version": 30,
+    }
+
+    @model_validator(mode="after")
+    def _truncate_client_info(self):
+        for field, width in self._CLIENT_INFO_WIDTHS.items():
+            v = getattr(self, field)
+            if isinstance(v, str):
+                v = v.strip()
+                setattr(self, field, v[:width] if v else None)
+        return self
 
 
 class SendNotificationRequest(BaseModel):

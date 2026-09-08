@@ -29,12 +29,23 @@ async def register_token(db: AsyncSession, user: User, data: PushTokenRegister) 
         select(PushToken).where(PushToken.user_id == user.id, PushToken.device_id == data.device_id)
     )
     existing = result.scalar_one_or_none()
+    # 앱 상태(버전/빌드/OTA)는 보낸 값으로 갱신; 구버전 앱이 안 보내면 기존 값 유지
+    state = {k: v for k, v in dict(
+        app_version=data.app_version, build_number=data.build_number, ota=data.ota, update_id=data.update_id,
+        device_model=data.device_model, os_name=data.os_name, os_version=data.os_version,
+    ).items() if v is not None}
     if existing:
         existing.push_token = data.push_token
         existing.platform = data.platform
         existing.is_active = True
+        for k, v in state.items():
+            setattr(existing, k, v)
+        existing.last_seen_at = now_et()
     else:
-        db.add(PushToken(user_id=user.id, push_token=data.push_token, device_id=data.device_id, platform=data.platform))
+        db.add(PushToken(
+            user_id=user.id, push_token=data.push_token, device_id=data.device_id, platform=data.platform,
+            last_seen_at=now_et(), **state,
+        ))
 
 
 async def deregister_token(db: AsyncSession, user: User, device_id: str) -> None:
