@@ -189,7 +189,7 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 
 - `GET /api/v1/holidays?from_date&to_date` (auth: `get_current_user`) — 공휴일(전 지점) + 내 지점(`t_holiday.bid = user.bid`) 휴일 병합. Defaults to the current month (ET).
 - `GET /api/v1/attendance/calendar?year&month` — every day of the month with merged status: `worked` (attendance record exists — holiday name still included alongside, "휴일 근무") → `holiday` → `dayoff` → `none`, plus a `summary` (worked/holiday/dayoff day counts). Defaults to the current month (ET).
-- `GET /api/v1/attendance/today` — now also returns `day_info` (`is_holiday`, `holiday_name`, `is_day_off`, all-day vs partial + `stime`/`etime`) — additive, old clients unaffected.
+- `GET /api/v1/attendance/today` — now also returns `day_info` (`is_holiday`, `holiday_name`, `is_day_off`, all-day vs partial + `stime`/`etime`, `day_off_type`) — additive, old clients unaffected. `day_off_type`은 2026-09-11 추가(dayofftype: personal/sick/bereavement).
 - Dayoffs come from the user's own `t_schedule` (`tid = t_user.id`, see DB Notes) where `eventtype ∈ DAYOFF_EVENT_TYPES` (`app/core/constants.py`, currently `{"dayoff"}` — extend as the LMS confirms more non-working types). Multi-day spans are expanded per-day; partial dayoffs (`allday='N'` with `stime`/`etime`) are flagged as non-all-day.
 - Holidays never block scans (`/scan`, `/manual`) — holiday work is recorded normally and shown as worked + holiday name.
 - Weekends are **not** hardcoded as off — branches have different working days; only `t_datelist`/`t_holiday`/`t_schedule` decide.
@@ -197,12 +197,22 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 
 ## PTO (Paid Time Off) — 자가 제출 (2026-09-05)
 
-직원이 앱에서 본인 개인 일정(`dayoff`=유급휴가, `personal`, `other`)을 **승인 절차 없이** 직접 제출한다 (구두 승인 후 본인 입력 — LMS Staff Schedule과 동일 기능). 쓰는 테이블은 `t_schedule`, 배정 일수는 `t_vacation`(HR이 LMS Staff Vacation에서 입력, 앱은 읽기만). Code: `app/services/pto_service.py`, `app/controllers/pto.py`, `app/schemas/pto.py`, `app/models/vacation.py`, 상수 `PTO_EVENT_TYPES`/`WORK_START`/`HALF_AM`/`HALF_PM` in `constants.py`.
+직원이 앱에서 본인 개인 일정(`dayoff`=유급휴가, `personal`, `other`)을 **승인 절차 없이** 직접 제출한다 (구두 승인 후 본인 입력 — LMS Staff Schedule과 동일 기능). 쓰는 테이블은 `t_schedule`, 배정 일수는 `t_vacation`(HR이 LMS Staff Vacation에서 입력, 앱은 읽기만). Code: `app/services/pto_service.py`, `app/controllers/pto.py`, `app/schemas/pto.py`, `app/models/vacation.py`, 상수 `PTO_EVENT_TYPES`/`WORK_START`/`HALF_AM`/`HALF_PM`/`DAYOFF_SUBTYPES` in `constants.py`.
+
+**Day Off 하위 타입 (2026-09-11, `t_schedule.dayofftype` varchar(50)):** `eventtype='dayoff'`인 행에 `dayofftype`으로 세부 유형을 구분한다. 값: `personal`(기본값) / `sick` / `bereavement`. 앱이 dayofftype을 안 보내면(구버전 호환) 서버가 `'personal'`로 기본 저장. `eventtype`이 dayoff가 아니면 dayofftype은 항상 null.
+
+**휴가 배정 타입별 분리 (2026-09-11, `t_vacation`):** `vacationday`(여름휴가) + `personalday`(Personal Days) + `sickday`(Sick Days). Bereavement는 배정 없음(사용만 추적). LMS Staff Vacation에서 HR이 입력.
+
+**잔여 계산 (`PtoBalance`, 풀 2개 + 추적 1개):**
+- **Vacation + Personal 풀:** `assigned = vacationday + personalday`, `used = dayofftype in (null, 'personal')` 합산, `remaining = assigned - used`. 개별 배정: `vacation_assigned`, `personal_assigned`.
+- **Sick 풀:** `sick_assigned`, `sick_used`, `sick_remaining`.
+- **Bereavement:** `bereavement_used`만 (배정 없음 — 한 해에 얼마나 될지 모르므로).
+- `from_date`/`to_date`는 표시용(t_vacation에서).
 
 **Endpoints** (`/api/v1/pto`, auth: `get_current_user`):
-- `GET ?year=` — 해당 연도(기본 올해 ET) 내 PTO 목록 + `balance` `{assigned, used, remaining, from_date, to_date}`. 항목마다 `mode`(`allday|am|pm|custom`), `days`(사용일수), `editable`(`date >= 오늘 ET`).
-- `POST` `{eventtype, eventname, days:[{date, mode, stime?, etime?}]}` — **여러 날 = 하루 1행씩** 생성(최대 31일, 날짜 중복 불가). `tid = uid = wid = 본인 id`, `ins_date/upd_date = now_et()`. 201 + `{items: 생성된 항목, skipped: [{date, name}]}` (skipped = dayoff에서 휴일이라 자동 제외된 날).
-- `PATCH /{schid}` — 타입/메모/날짜/모드 수정. `DELETE /{schid}`.
+- `GET ?year=` — 해당 연도(기본 올해 ET) 내 PTO 목록 + `balance` (풀별 배정/사용/잔여 — 위 PtoBalance 참조). 항목마다 `mode`(`allday|am|pm|custom`), `days`(사용일수), `dayofftype`(dayoff 하위 타입), `editable`(`date >= 오늘 ET`).
+- `POST` `{eventtype, eventname, dayofftype?, days:[{date, mode, stime?, etime?}]}` — **여러 날 = 하루 1행씩** 생성(최대 31일, 날짜 중복 불가). `dayofftype`은 eventtype=dayoff일 때만 의미(미지정 시 'personal'). `tid = uid = wid = 본인 id`, `ins_date/upd_date = now_et()`. 201 + `{items: 생성된 항목, skipped: [{date, name}]}` (skipped = dayoff에서 휴일이라 자동 제외된 날).
+- `PATCH /{schid}` — 타입/메모/날짜/모드/dayofftype 수정. eventtype을 dayoff 외로 변경하면 dayofftype 자동 null. `DELETE /{schid}`.
 
 **정책 (오너 확정 2026-09-05 — 재검토 금지):**
 - **과거 날짜(`sdate < 오늘 ET`)는 역할 무관 앱에서 생성·수정·삭제 전부 403** ("Past entries can only be changed in the LMS"). 오늘 당일은 허용. LMS의 "권한 있으면 과거 수정" 예외는 앱에 두지 않는다 — `user_role`이 자유 텍스트라 서버가 관리자를 판별할 수 없고, 과거 수정은 HR 성격이라 LMS 감사 하에 둔다.
@@ -212,7 +222,7 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 - 본인 행이 아니거나 PTO 타입이 아니면 404 (class 행 등은 절대 수정 불가). 휴가여도 `/scan`은 그대로 동작(초과근무 등).
 - **추가 확정 (2026-09-05 오너):** 삭제는 하루 단위(일괄 삭제 없음 — 행이 하루 1행이라 LMS와 동일) / **관리자가 대신 입력한 미래 PTO도 본인이 수정·삭제 가능**(`tid = 본인`이면 본인 행; `wid`는 보지 않음) / 요일은 자동 제외 없음(휴일만 dayoff에서 자동 제외 — 위 항목) / 한 번 제출 = 타입·메모 하나, 중복 시 요청 전체 409(부분 저장 없음).
 
-**사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). `dayoff`만 합산, 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. `assigned` = `t_vacation.vacationday WHERE userid=본인 AND ayear='<년>'`(char), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
+**사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). dayofftype별로 풀에 집계(personal/null → Vacation+Personal 풀, sick → Sick 풀, bereavement → 추적만). 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. 배정은 `t_vacation WHERE userid=본인 AND ayear='<년>'`(char)에서 `vacationday`+`personalday`(합산), `sickday`(별도), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
 
 ## Daily Log / Task Report
 
@@ -255,6 +265,7 @@ App-level, in-memory sliding-window limiter (`app/core/rate_limit.py`) applied v
 - **업로드는 커밋 `539f5f0`(2026-09-05, dayoff 휴일 자동 제외) 이후 상태로** — 위 12개 파일 목록은 그대로지만 `pto_service.py`/`schemas/pto.py`/`controllers/pto.py`가 그 커밋에서 다시 바뀌었다(POST 응답이 `{items, skipped}`). 이전 커밋 파일을 올리면 앱의 제출 결과 처리가 어긋난다.
 - **2026-09-08 추가분 — DB 변경 있음:** `changelog.sql`의 `ALTER TABLE t_push_token ADD COLUMN app_version … last_seen_at`을 **서버 코드 배포와 같은 시점에** 프로덕션 MySQL에서 실행(컬럼 없이 새 코드가 뜨면 토큰 등록 500 → 푸시 끊김). 함께 올릴 파일: `app/models/notification.py`, `app/schemas/notification.py`, `app/services/notification_service.py`, `app/controllers/app_info.py`.
 - **릴리스 완료 (2026-09-08):** 서버 코드(PTO + t_push_token 앱 상태 컬럼, ALTER 포함) 프로덕션 배포·재시작 완료, 앱은 `eas update --branch production` 발행 완료 → 1.3.0 전 사용자(iOS·Android) 적용 확인. `version` 1.3.0 유지. 이후 서버 추가분(`f675e71` 상태만 보고, `21000e4` LATEST_BUILD 옵션)은 `app/schemas/notification.py`, `app/services/notification_service.py`, `app/controllers/app_info.py` 재업로드로 반영.
+- **2026-09-11 dayofftype 추가분 — DB 변경 선행 완료 (LMS 쪽에서 ALTER):** `t_schedule.dayofftype` varchar(50), `t_vacation.personalday`/`sickday` float. 서버 코드만 업로드: `app/core/constants.py`, `app/models/schedule.py`, `app/models/vacation.py`, `app/schemas/attendance.py`, `app/schemas/pto.py`, `app/schemas/schedule.py`, `app/services/attendance_service.py`, `app/services/pto_service.py` (8개). 앱은 OTA(`eas update --branch production`).
 - 남은 1.2.0 사용자(Expo 토큰 행)는 1.4.0 스토어 배포 때 `MIN_VERSION` 상향으로 정리 예정. 같은 사용자의 Expo/FCM 중복 행(device_id에 OS 버전이 들어가 OS 업데이트마다 새 행)은 **같은 폰에 알림이 두 번 가는 실제 원인**이라 서버 자동 비활성화 규칙 + 일회성 정리 SQL(`changelog.sql` 2026-09-08)을 넣었다 — 아래 Push 섹션 참조.
 
 ## DB Notes
@@ -272,6 +283,7 @@ The app runtime uses `settings.ASYNC_DATABASE_URL` (aiomysql). The `ASYNC_DATABA
 - **`uid` = 로그인 사용자(작성자), `wid` = 작성자.** 둘 다 대상이 아니다. 관리자가 대신 입력하면 `tid=대상, uid=wid=관리자`. 7월에 `uid`를 "직원 일정 대상"으로 쓰기로 했던 규칙은 LMS가 채택하지 않았다 — **`uid`로 매칭하면 관리자가 대신 넣은 타인 일정이 관리자 본인 것으로 보인다.**
 - `schedule_service.subject_filter`: PTO 3종은 `tid = user.id`, 그 외 유형은 `tid = user.tid`(tid 없으면 생략). `uid`는 매칭에 쓰지 않음.
 - **티처는 당분간 배제 (2026-09-05):** 티처는 앱을 쓰지 않고(푸시 토큰 없음) 수업은 `t_tutorschedule`(앱 미조회)에서 관리. `t_teacher.tid`와 `t_user.id`의 숫자 범위 겹침(1~263 vs 2~), Instructor 화면에서 넣은 티처 dayoff 행의 오귀속은 수용된 한계 — 재보고 금지.
+- **`dayofftype`** (2026-09-11 추가, varchar(50), nullable): `eventtype='dayoff'`일 때만 의미. `personal`(기본) / `sick` / `bereavement`. dayoff가 아닌 행은 null. LMS Staff Schedule에서도 동일하게 저장.
 - **LMS 저장 형식 (앱 제출도 동일):** 하루 1행(`sdate = edate`), 종일 `08:00–17:00 / allday Y / halfday N`, 오전 반차 `08:00–12:00 / N / halfday A`, 오후 반차 `13:00–17:00 / N / halfday P`, 시간 지정 `임의 / N / N`. 메모 없으면 `eventname=''`. `halfday`는 프로덕션에 있던 컬럼(로컬은 2026-09-05 추가).
 - Events can span dates (`sdate`~`edate`, `edate` may be NULL for single-day) in legacy rows; range queries must use overlap logic (`sdate <= to AND COALESCE(edate, sdate) >= from`), not `sdate BETWEEN`.
 
@@ -293,4 +305,5 @@ No test suite exists yet. `tests/` contains only `__init__.py`.
 `app/core/constants.py` holds app-wide constants. Currently:
 - `APP_TZ` — `ZoneInfo("America/New_York")` (Eastern Time, covers NY and GA locations)
 - `DAYOFF_EVENT_TYPES` — `t_schedule.eventtype` values treated as "not working" for attendance views (currently `{"dayoff"}`)
+- `DAYOFF_SUBTYPES` — dayoff 하위 타입 `{"personal","sick","bereavement"}` (eventtype='dayoff'일 때만 의미)
 - `PTO_EVENT_TYPES` — 앱에서 자가 제출 가능한 유형 `{"dayoff","personal","other"}`; `WORK_START/WORK_END/HALF_AM/HALF_PM/WORK_HOURS` — 근무 08–17, 반차 08–12 / 13–17 (LMS 저장값과 동일해야 함)
