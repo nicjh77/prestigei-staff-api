@@ -16,6 +16,8 @@ class Vacation(Base):
     fromdate: Mapped[date | None] = mapped_column(Date, nullable=True)
     todate: Mapped[date | None] = mapped_column(Date, nullable=True)
     vacationday: Mapped[float | None] = mapped_column(Float, nullable=True)
+    personalday: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sickday: Mapped[float | None] = mapped_column(Float, nullable=True)
     added: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     addedby: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

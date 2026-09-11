@@ -20,6 +20,7 @@ class ScheduleOut(BaseModel):
     halfday: str | None   # N / A(오전 반차) / P(오후 반차)
     eventname: str | None
     eventtype: str | None
+    dayofftype: str | None = None
 
     model_config = {"from_attributes": True}
 

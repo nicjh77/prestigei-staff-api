@@ -89,6 +89,7 @@ def _to_item(s: Schedule, today: date) -> PtoItem:
         date=s.sdate,
         eventtype=s.eventtype,
         eventname=s.eventname or "",
+        dayofftype=s.dayofftype,
         mode=_mode_of(s),
         stime=s.stime,
         etime=s.etime,
@@ -116,11 +117,24 @@ async def _year_rows(db: AsyncSession, user: User, year: int) -> list[Schedule]:
     return list(result.scalars().all())
 
 
+def _sum_days(rows: list[Schedule], predicate) -> float:
+    return _round2(sum(Decimal(str(used_days(s))) for s in rows if predicate(s)))
+
+
 async def get_balance(db: AsyncSession, user: User, year: int, rows: list[Schedule] | None = None) -> PtoBalance:
-    """배정(t_vacation.vacationday, ayear=달력 연도) vs 사용(dayoff 행 합, YEAR(sdate), tid=t_user.id) — LMS 쿼리와 동일"""
+    """타입별 배정/사용 잔여 — Vacation+Personal 풀, Sick 풀, Bereavement(사용만 추적)"""
     if rows is None:
         rows = await _year_rows(db, user, year)
-    used = _round2(sum(Decimal(str(used_days(s))) for s in rows if s.eventtype == "dayoff"))
+
+    dayoff_rows = [s for s in rows if s.eventtype == "dayoff"]
+
+    # Vacation+Personal 풀: dayofftype이 null(레거시) 또는 'personal'
+    vp_used = _sum_days(dayoff_rows, lambda s: s.dayofftype in (None, "personal"))
+    # Sick 풀
+    sick_used = _sum_days(dayoff_rows, lambda s: s.dayofftype == "sick")
+    # Bereavement (배정 없음)
+    bereavement_used = _sum_days(dayoff_rows, lambda s: s.dayofftype == "bereavement")
+
     result = await db.execute(
         select(Vacation)
         .where(Vacation.userid == user.id, Vacation.ayear == str(year))
@@ -128,13 +142,23 @@ async def get_balance(db: AsyncSession, user: User, year: int, rows: list[Schedu
         .limit(1)
     )
     v = result.scalar_one_or_none()
-    # LMS 쿼리와 동일: 배정 행이 없으면 0.0 (IFNULL) — remaining은 음수가 될 수 있음(경고 표시용, 차단 안 함)
-    assigned = float(v.vacationday) if v and v.vacationday is not None else 0.0
+
+    vacation_assigned = float(v.vacationday) if v and v.vacationday is not None else 0.0
+    personal_assigned = float(v.personalday) if v and v.personalday is not None else 0.0
+    sick_assigned = float(v.sickday) if v and v.sickday is not None else 0.0
+    assigned = _round2(Decimal(str(vacation_assigned)) + Decimal(str(personal_assigned)))
+
     return PtoBalance(
         year=year,
         assigned=assigned,
-        used=used,
-        remaining=_round2(Decimal(str(assigned)) - Decimal(str(used))),
+        used=vp_used,
+        remaining=_round2(Decimal(str(assigned)) - Decimal(str(vp_used))),
+        vacation_assigned=vacation_assigned,
+        personal_assigned=personal_assigned,
+        sick_assigned=sick_assigned,
+        sick_used=sick_used,
+        sick_remaining=_round2(Decimal(str(sick_assigned)) - Decimal(str(sick_used))),
+        bereavement_used=bereavement_used,
         from_date=v.fromdate if v else None,
         to_date=v.todate if v else None,
     )
@@ -214,6 +238,11 @@ async def create_pto(db: AsyncSession, user: User, data: PtoCreate) -> PtoCreate
     for d in data.days:
         _require_not_past(d.date, today)
 
+    # dayoff 하위 타입: 미지정 시 'personal' 기본 (앱이 안 보내는 구버전 호환)
+    dayofftype = None
+    if data.eventtype == "dayoff":
+        dayofftype = data.dayofftype or "personal"
+
     # dayoff는 휴일(전체·내 지점)을 자동 제외 — LMS Staff Schedule과 동일 규칙 (오너 2026-09-05).
     # 일요일 등 요일은 지점마다 근무 여부가 달라 건드리지 않는다. personal/other는 휴일에도 그대로 추가.
     days = list(data.days)
@@ -237,6 +266,7 @@ async def create_pto(db: AsyncSession, user: User, data: PtoCreate) -> PtoCreate
             tid=user.id, uid=user.id, wid=user.id,
             sdate=d.date, edate=d.date,
             eventname=data.eventname, eventtype=data.eventtype,
+            dayofftype=dayofftype,
             ins_date=now, upd_date=now,
             **_mode_fields(d.mode, d.stime, d.etime),
         ))
@@ -267,6 +297,11 @@ async def update_pto(db: AsyncSession, user: User, schid: int, data: PtoUpdate) 
     s.sdate = new_date
     s.edate = new_date  # 앱이 수정한 행은 하루 1행으로 정규화 (레거시 스팬 행이어도)
     s.eventtype = new_type
+    # dayofftype: dayoff가 아니면 항상 null, dayoff면 명시 지정 시만 갱신
+    if new_type != "dayoff":
+        s.dayofftype = None
+    elif data.dayofftype is not None:
+        s.dayofftype = data.dayofftype
     if data.eventname is not None:
         s.eventname = data.eventname
     if data.mode is not None:

@@ -33,6 +33,7 @@ class DayInfo(BaseModel):
     day_off_stime: str | None         # 부분 휴가 시작 (HH:MM)
     day_off_etime: str | None
     day_off_name: str | None          # eventname
+    day_off_type: str | None = None   # dayofftype (personal/sick/bereavement)
 
 
 # 하루 안의 개별 in/out 쌍 (하루 여러 행 허용 — LMS와 동일)
@@ -63,6 +64,7 @@ class AttendanceDay(BaseModel):
     day_off_stime: str | None
     day_off_etime: str | None
     day_off_name: str | None
+    day_off_type: str | None = None   # dayofftype (personal/sick/bereavement)
 
 
 class CalendarSummary(BaseModel):

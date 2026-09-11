@@ -147,7 +147,7 @@ async def _dayoffs_by_date(
 
 def _day_off_fields(s: Schedule | None) -> dict:
     if s is None:
-        return dict(day_off=False, day_off_all_day=None, day_off_stime=None, day_off_etime=None, day_off_name=None)
+        return dict(day_off=False, day_off_all_day=None, day_off_stime=None, day_off_etime=None, day_off_name=None, day_off_type=None)
     return dict(
         day_off=True,
         # allday='Y' 또는 시간 미지정이면 종일 휴가, 아니면 부분 휴가
@@ -155,6 +155,7 @@ def _day_off_fields(s: Schedule | None) -> dict:
         day_off_stime=s.stime,
         day_off_etime=s.etime,
         day_off_name=s.eventname or None,
+        day_off_type=s.dayofftype,
     )
 
 

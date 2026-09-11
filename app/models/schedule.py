@@ -23,6 +23,7 @@ class Schedule(Base):
     halfday: Mapped[str | None] = mapped_column(CHAR(1), nullable=True, default="N")  # N / A(오전) / P(오후)
     eventname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     eventtype: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    dayofftype: Mapped[str | None] = mapped_column(String(50), nullable=True)  # personal/sick/bereavement (dayoff 하위)
     eventid: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ins_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     upd_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -19,6 +19,9 @@ def now_et():
 # 프로덕션에서 다른 유형이 확인되면 여기에 추가 (예: "vacation")
 DAYOFF_EVENT_TYPES = frozenset({"dayoff"})
 
+# Day Off 하위 타입 (eventtype='dayoff'일 때만 의미)
+DAYOFF_SUBTYPES = frozenset({"personal", "sick", "bereavement"})
+
 # ---- PTO (자가 제출 개인 일정) ----
 # t_schedule.eventtype 중 직원이 앱에서 직접 제출/수정/삭제할 수 있는 유형.
 # LMS Staff Schedule과 동일: 대상자는 tid(=t_user.id), uid/wid = 작성자. dayoff만 휴가 일수에 집계.

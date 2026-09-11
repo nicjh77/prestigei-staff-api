@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 PtoType = Literal["dayoff", "personal", "other"]
+DayOffSubType = Literal["personal", "sick", "bereavement"]
 # allday=종일 08-17 / am=오전반차 08-12 / pm=오후반차 13-17 / custom=시간 지정
 PtoMode = Literal["allday", "am", "pm", "custom"]
 
@@ -35,6 +36,7 @@ class PtoDay(BaseModel):
 class PtoCreate(BaseModel):
     eventtype: PtoType
     eventname: str = Field("", max_length=255)
+    dayofftype: DayOffSubType | None = None  # eventtype='dayoff'일 때만 — 미지정 시 'personal' 기본
     days: list[PtoDay] = Field(..., min_length=1, max_length=31)
 
     @model_validator(mode="after")
@@ -48,6 +50,7 @@ class PtoCreate(BaseModel):
 class PtoUpdate(BaseModel):
     eventtype: PtoType | None = None
     eventname: str | None = Field(None, max_length=255)
+    dayofftype: DayOffSubType | None = None  # eventtype='dayoff'일 때만 의미
     date: date_type | None = None
     mode: PtoMode | None = None
     stime: str | None = Field(None, **_TIME)
@@ -64,6 +67,7 @@ class PtoItem(BaseModel):
     date: date_type
     eventtype: str
     eventname: str
+    dayofftype: str | None       # personal/sick/bereavement (dayoff 하위)
     mode: PtoMode
     stime: str | None
     etime: str | None
@@ -85,10 +89,21 @@ class PtoCreateResponse(BaseModel):
 
 class PtoBalance(BaseModel):
     year: int
-    assigned: float             # t_vacation.vacationday (배정 행 없으면 0.0 — LMS IFNULL과 동일)
-    used: float                 # dayoff 사용일수 합 (LMS usp_selstaffvacation 공식)
-    remaining: float            # assigned - used (초과 시 음수 — 앱은 경고만, 차단 안 함)
-    from_date: date_type | None # t_vacation.fromdate (표시용)
+    # Vacation + Personal 풀 (personal/legacy-null 사용)
+    assigned: float             # vacationday + personalday
+    used: float                 # dayofftype in (null, 'personal') 사용일수
+    remaining: float            # assigned - used
+    # 개별 배정
+    vacation_assigned: float
+    personal_assigned: float
+    # Sick 풀
+    sick_assigned: float
+    sick_used: float
+    sick_remaining: float
+    # Bereavement (배정 없음, 사용만 추적)
+    bereavement_used: float
+    # 표시용
+    from_date: date_type | None
     to_date: date_type | None
 
 
