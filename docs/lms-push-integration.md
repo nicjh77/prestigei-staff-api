@@ -1,4 +1,4 @@
-# Staff API 푸시 알림 발송 연동 명세 (v1.1 — 2026-08-12)
+# Staff API 푸시 알림 발송 연동 명세 (v1.2 — 2026-09-18)
 
 LMS → Staff API 푸시 발송 연동 문서. LMS가 이 API를 호출하면 Staff API가 대상자 조회,
 FCM/Expo 발송, 알림함 기록, 읽음 추적까지 전부 처리한다.
@@ -47,7 +47,7 @@ X-API-Key: <공유 시크릿>
 |---|---|
 | `route` | 배너 탭 시 이동할 앱 화면. 허용값 4개: `/(tabs)`(홈) · `/(tabs)/notifications`(알림함) · `/(tabs)/attendance`(출퇴근) · `/(tabs)/profile`(프로필). **생략하면 해당 알림의 상세 화면으로 바로 이동** (일반적으로 생략 권장). 허용값 외는 무시됨 |
 | `imageUrl` | 이미지 주소, **https 필수**. 앱 알림 상세에 이미지 카드로 표시 + **Android 배너에 큰 이미지**로 표시 (iOS 배너는 텍스트만, 상세에서는 표시됨) |
-| `youtubeCode` | 유튜브 영상 코드 (URL 말고 코드만 — `https://youtu.be/dQw4w9WgXcQ`의 `dQw4w9WgXcQ` 부분). 상세에 썸네일+재생버튼으로 표시, 탭하면 유튜브로 이동. 자동재생 없음 |
+| `youtubeCode` | 유튜브 영상 **코드 또는 전체 주소** 둘 다 가능(2026-09-18 앱 업데이트부터). 코드는 `https://youtu.be/dQw4w9WgXcQ`의 `dQw4w9WgXcQ` 부분(6~20자 영숫자/`-`/`_`); 주소는 `youtu.be/…`, `youtube.com/watch?v=…`, `/shorts/…`, `/embed/…`, `/live/…` (www/m/music 호스트, `?si=`·`&t=` 등 꼬리 무시). 유튜브가 아닌 주소나 형식이 틀리면 영상 카드만 표시되지 않음(발송은 됨). 상세에 썸네일+재생버튼으로 표시, 탭하면 유튜브로 이동. 자동재생 없음 |
 | `notification_id` | ⚠️ **서버 예약 키 — LMS가 넣지 말 것** (넣어도 서버가 덮어씀) |
 
 ### ⚠️ 필드 이름 정확히
@@ -97,5 +97,6 @@ curl -X POST https://staff-app.prestigei.com/api/v1/notifications/send \
 ---
 
 변경 이력:
+- v1.2 (2026-09-18): `youtubeCode`에 **전체 유튜브 주소도 허용**(코드 추출은 앱이 처리; 학생 앱과 동일 규칙). 요청/응답 형식 변경 없음 — 아직 업데이트 안 된 구버전 앱은 코드만 인식하므로 LMS는 당분간 코드 전송을 권장.
 - v1.1 (2026-08-12): `data.imageUrl`/`data.youtubeCode` 추가, route 생략 시 상세 직행, 알 수 없는 필드 422 거부
 - v1.0 (2026-06): 최초 계약 (title/body/user_ids/data.route)
