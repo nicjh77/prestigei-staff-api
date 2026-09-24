@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     # 값이 틀리거나 파일이 없어도 부팅은 막지 않는다 — 첫 발송 시점에만 읽히고, 실패해도 그 발송만 실패한다.
     FIREBASE_CREDENTIALS_PATH: str = ""
 
+    # --- Check build (GET /app/version-check, 학생 앱 서버와 같은 이름) ---
+    # 스토어에 라이브된 버전·빌드. 앱 버전이 이보다 낮으면 강제 업데이트, 같은 버전인데 빌드가 낮으면 스토어 안내.
+    # VERSION 빈 값 = 그 플랫폼은 체크 안 함. BUILD 0 = 빌드 비교 안 함.
+    APP_ANDROID_VERSION: str = ""
+    APP_ANDROID_BUILD: int = 0
+    APP_IOS_VERSION: str = ""
+    APP_IOS_BUILD: int = 0
+
     model_config = SettingsConfigDict(
         env_file=_env_file,
         env_file_encoding="utf-8",
@@ -37,6 +45,15 @@ class Settings(BaseSettings):
         # HS256 서명 키가 짧거나 자리표시자면 액세스 토큰 위조 위험 → 부팅 차단
         if len(v) < 32 or v.strip().lower() in _PLACEHOLDER_SECRETS:
             raise ValueError("SECRET_KEY must be a random string of at least 32 characters")
+        return v
+
+    @field_validator("APP_ANDROID_VERSION", "APP_IOS_VERSION")
+    @classmethod
+    def _semver_like(cls, v: str) -> str:
+        # 오타("1.4", "v1.4.0")가 조용히 "강제 없음"으로 흘러가지 않도록 부팅 시 검증 (빈 값은 허용 = 체크 안 함)
+        v = v.strip()
+        if v and not (len(v.split(".")) == 3 and all(p.isdigit() for p in v.split("."))):
+            raise ValueError(f"expected MAJOR.MINOR.PATCH or empty, got {v!r}")
         return v
 
     @property

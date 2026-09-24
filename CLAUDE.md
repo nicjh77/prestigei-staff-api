@@ -24,11 +24,13 @@ APP_ENV=production uvicorn main:app
 
 **Never commit env files.** `.env`, `.env.local`, and `.env.production` are all gitignored — they hold secrets (`SECRET_KEY`, DB credentials, `LMS_API_KEY`). Only `.env.example` (no real values) is tracked. If a secret is ever committed, purge it from history and rotate the value, not just `git rm`.
 
-`Settings` in `app/core/config.py` has no Python defaults (except `LMS_API_KEY = ""`) — all other values must come from the env file. When adding a new setting, add it to every env file in use.
+`Settings` in `app/core/config.py` has no Python defaults (except the "empty = disabled" values `LMS_API_KEY`, `FIREBASE_CREDENTIALS_PATH`, `APP_*_VERSION/BUILD`) — all other values must come from the env file. When adding a new setting, add it to every env file in use.
 
 Required env vars: `DATABASE_URL`, `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES` (2026-07-22부터 4320 = 3일; 리프레시 토큰 제거로 액세스 토큰만 사용).
 
 **DATABASE_URL must include `?charset=utf8mb4`** to prevent Korean/CJK text corruption (e.g. `mysql+pymysql://...?charset=utf8mb4`).
+
+App version check env vars: `APP_ANDROID_VERSION`, `APP_ANDROID_BUILD`, `APP_IOS_VERSION`, `APP_IOS_BUILD` — see "App version check" below.
 
 Optional env vars: `LMS_API_KEY` — shared secret for LMS → Staff API notification calls. Defaults to empty (API key auth disabled). The env var `LMS_API_KEY` (server side) and the request header `X-API-Key` (caller side) are the same secret under two names: `require_admin_or_api_key` compares the incoming `X-API-Key` header against `settings.LMS_API_KEY` via `secrets.compare_digest`. Behavior in `app/core/dependencies.py`: if the request sends an `X-API-Key` header but `LMS_API_KEY` is empty → `500 "LMS_API_KEY not configured"`; if it doesn't match → `403`. When testing `/notifications/send` as an admin, send only the `Bearer` JWT and **omit** the `X-API-Key` header (sending it forces the API-key path).
 
@@ -166,7 +168,7 @@ Push는 **토큰 종류로 경로가 갈린다**. `app/utils/push.py`가 유일�
 
 ## App version check
 
-`GET /api/v1/app/version-check?platform&current` (no auth, `app/controllers/app_info.py`) → `{min_version, force_update, latest_version, store_update_available}`. `MIN_VERSION` = 이 미만이면 앱이 "Update Required" 강제 안내(스토어 라이브 확인 후에만 올릴 것). `LATEST_VERSION`(2026-09-08 추가) = 스토어 최신 버전 — 앱 Profile > About "Check for updates"가 OTA가 없을 때 "스토어에 새 버전 있음"을 안내하는 데 씀(강제 아님). **스토어 릴리스 때마다 `LATEST_VERSION`을 올려야** 안내가 맞다. `LATEST_BUILD = {"android": None, "ios": None}` — 같은 버전의 재빌드(예: 2.0.0 빌드 1·2·3 내부 테스트)까지 안내하려면 플랫폼별 최신 빌드 번호를 채운다(None = 빌드 비교 안 함). 앱이 `build` 파라미터를 보내며, 버전이 같고 빌드가 낮으면 `store_update_available=true`. 응답에 `latest_build` 포함.
+`GET /api/v1/app/version-check?platform&current&build` (no auth, `app/controllers/app_info.py`) → `{min_version, force_update, latest_version, latest_build, store_update_available}`. **기준값은 서버 `.env`, 학생 앱 서버와 같은 이름 (2026-09-24, 코드 상수 폐지):** `APP_ANDROID_VERSION` / `APP_ANDROID_BUILD` / `APP_IOS_VERSION` / `APP_IOS_BUILD` = 스토어에 **라이브된** 버전·빌드(Android versionCode / iOS buildNumber). 판정: 앱 버전이 스토어 버전보다 낮으면 `force_update`(구버전 전부 강제 "Update Required"), 같은 버전인데 빌드가 낮으면 `store_update_available`만(About "Check for updates"의 Open Store 안내, 강제 아님). VERSION 빈 값 = 그 플랫폼 체크 안 함, BUILD 0 = 빌드 비교 안 함. 응답의 `min_version`/`latest_version`은 둘 다 스토어 버전(앱 1.3.0 호환용으로 키 유지). `config.py`가 부팅 시 `MAJOR.MINOR.PATCH` 형식을 검증한다. **스토어 릴리스 절차: 양 스토어 라이브 확인 → 서버 `.env` 값 변경 → 재시작** (코드 업로드 없음). 라이브 전에 올리면 아직 받을 수 없는 업데이트를 강제하니 주의. 기본값이 전부 있어(빈 값/0) 이 코드를 env보다 먼저 올려도 부팅은 된다(체크만 꺼짐).
 
 ## Notice Board (Notice)
 
