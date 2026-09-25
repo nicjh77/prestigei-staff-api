@@ -226,6 +226,13 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 
 **사용일수 공식 = LMS `usp_selstaffvacation` 그대로 (`pto_service.used_days`, 수정 금지 — LMS 화면과 숫자가 같아야 함):** `allday='Y'`→1.0, 반차(`halfday` A/P, 구 'Y')→0.5, `etime-stime ≥ 8h`→1.0, 음수→0, 그 외 `ROUND(초/8h*100,2)/100` (**점심 미차감**, 예: 10:00–15:00 = 0.625). dayofftype별로 풀에 집계(personal/null → Vacation+Personal 풀, sick → Sick 풀, bereavement → 추적만). 합계 `ROUND(,2)`. 반올림은 MySQL과 같은 **half-up**(`Decimal`) — Python `round(1.625,2)`는 1.62라 어긋난다. 배정은 `t_vacation WHERE userid=본인 AND ayear='<년>'`(char)에서 `vacationday`+`personalday`(합산), `sickday`(별도), 없으면 **0.0**(LMS `IFNULL`과 동일). 달력 연도(`YEAR(sdate)`) 기준, `fromdate/todate`는 표시용.
 
+## Students (search only)
+
+`GET /api/v1/students/search?q=` (auth: `get_current_user`, `q` 2~50자) → `[{sid, name, branch, grade}]` 최대 15건. 앱 **Recording** 화면(1.5.0)에서 "누구와의 녹음인지" 고르는 자동완성용. Code: `app/models/student.py`(`t_studentmain`), `app/services/student_service.py`, `app/controllers/students.py`, `app/schemas/student.py`.
+- `t_studentmain`은 soft-delete 컬럼이 없다(삭제 학생은 `t_student_deleted`로 이동) — 행 전부 현행. `regbid`(등록 지점) → `t_branch.fullname`을 `branch` 라벨로, `entgrade`를 `grade`로 붙인다.
+- **전 지점 검색** (상담은 지점을 넘나듦). `fullname`/`fname`/`lname` LIKE 부분 일치(와일드카드 이스케이프), 앞글자 일치 우선 → 이름순. 개인정보(전화·이메일·메모)는 절대 반환하지 않는다.
+- 녹음 파일 자체는 아직 서버에 올리지 않는다 — 앱이 폰에만 저장하고 업로드 버튼은 자리만 있음(2026-09-25 결정, 서버 저장 설계는 이후 별도).
+
 ## Daily Log / Task Report
 
 읽기 전용 — 태스크·로그 데이터는 LMS가 쓴다 (`t_daily_log_task`, `t_daily_log`, `t_daily_category`). 코드: `app/services/daily_log_service.py`, `app/controllers/daily_log.py`.
