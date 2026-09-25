@@ -8,6 +8,7 @@ from app.controllers import (
     notice,
     notifications,
     pto,
+    recordings,
     schedule,
     students,
     users,
@@ -27,5 +28,6 @@ routers = [
     (notifications.router,  "/notifications"),
     (weekly_vision.router,  "/weekly-vision"),
     (students.router,       "/students"),
+    (recordings.router,     "/recordings"),
     (app_info.router,       "/app"),
 ]

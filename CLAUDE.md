@@ -233,6 +233,13 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 - **전 지점 검색** (상담은 지점을 넘나듦). `fullname`/`fname`/`lname` LIKE 부분 일치(와일드카드 이스케이프), 앞글자 일치 우선 → 이름순. 개인정보(전화·이메일·메모)는 절대 반환하지 않는다.
 - 녹음 파일 자체는 아직 서버에 올리지 않는다 — 앱이 폰에만 저장하고 업로드 버튼은 자리만 있음(2026-09-25 결정, 서버 저장 설계는 이후 별도).
 
+## Recordings (session lists only)
+
+`GET /api/v1/recordings/sessions?type=tutoring|class&date=&bid=` / `GET /api/v1/recordings/branches` (auth: `get_current_user`). 앱 Recording 화면에서 Tutoring/Class 녹음을 어느 LMS 일정에 붙일지 고르는 목록. Code: `app/services/recording_session_service.py`(raw SQL), `app/controllers/recordings.py`, `app/schemas/recording.py`.
+- SQL은 **LMS recording 사이트(recording.prestigei.com, Node `server.js`)의 `/api/tutor-schedules`·`/api/class-schedules`를 그대로 옮긴 것** — 튜터링 = `t_tutorschedule`(scid, 학생·교사·출석·메모), 수업 = `t_classdate × t_classmain × t_classteacher`(cid, cdid, ctid — ctid는 NULL 가능). 그 사이트는 이 키로 `t_tutor_record`/`t_class_record`에 STT 텍스트를 저장하므로, 앱도 같은 키를 폰에 보관해 두었다가 나중에 업로드할 때 넘긴다.
+- `date` 기본 오늘(ET), `bid` 생략 = 내 지점, `0` = 전체. 로그인 사용자의 `t_user.tid`가 담당 교사인 일정은 `mine=true`로 앞에 정렬.
+- 업로드·Azure STT·LMS 테이블 쓰기는 없다(오너 결정 2026-09-25: 우선 가짜 버튼). 붙일 때 방향은 B안 = 앱 m4a 업로드 → 서버 배치 변환(Azure 키는 LMS 쪽 보유) — 앱 CLAUDE.md "Recording 메모" 참조.
+
 ## Daily Log / Task Report
 
 읽기 전용 — 태스크·로그 데이터는 LMS가 쓴다 (`t_daily_log_task`, `t_daily_log`, `t_daily_category`). 코드: `app/services/daily_log_service.py`, `app/controllers/daily_log.py`.
