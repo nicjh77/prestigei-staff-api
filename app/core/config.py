@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # 비우면 POST /recordings/transcribe 가 503 (변환만 비활성, 부팅·녹음은 정상).
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = ""
+    # 업로드 임시 파일 위치. 비우면 시스템 기본(/tmp). **프로덕션 LMS02 는 /tmp 가 tmpfs(RAM)** 라(2026-09-25 확인) 60MB×n 업로드가
+    # 메모리를 먹는다 → 실제 디스크 경로를 준다 (예: /var/www/staff-app/tmp, svc-node 소유). Starlette 의 수신 임시본과
+    # 우리 rec_* 둘 다 이 경로를 쓴다 (main.py 가 tempfile.tempdir 로 지정).
+    UPLOAD_TMP_DIR: str = ""
 
     # --- Check build (GET /app/version-check, 학생 앱 서버와 같은 이름) ---
     # 스토어에 라이브된 버전·빌드. 앱 버전이 이보다 낮으면 강제 업데이트, 같은 버전인데 빌드가 낮으면 스토어 안내.
