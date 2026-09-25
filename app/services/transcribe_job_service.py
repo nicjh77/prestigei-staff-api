@@ -46,10 +46,10 @@ def get(job_id: str, user_id: int) -> TranscribeJob | None:
     return job if job and job.user_id == user_id else None
 
 
-async def run(job: TranscribeJob, tmp_path: str, filename: str, content_type: str, locale: str, diarize: bool) -> None:
+async def run(job: TranscribeJob, tmp_path: str, filename: str, content_type: str, locale: str, diarize: bool, max_speakers: int = 2) -> None:
     job.status = "running"
     try:
-        result = await azure_speech_service.transcribe_file(tmp_path, filename, content_type, locale, diarize)
+        result = await azure_speech_service.transcribe_file(tmp_path, filename, content_type, locale, diarize, max_speakers)
         job.transcript = result["transcript"]
         job.duration_ms = result["duration_ms"]
         job.status = "done"
