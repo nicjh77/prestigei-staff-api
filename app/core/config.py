@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # 메모리를 먹는다 → 실제 디스크 경로를 준다 (예: /var/www/staff-app/tmp, svc-node 소유). Starlette 의 수신 임시본과
     # 우리 rec_* 둘 다 이 경로를 쓴다 (main.py 가 tempfile.tempdir 로 지정).
     UPLOAD_TMP_DIR: str = ""
+    # Recording 일정 목록의 지점 접근 범위 (2026-09-25 오너): HQ(bid 6) 는 전 지점, 그 외는 t_user.bid 하나.
+    # DB 에 "여러 지점 소속" 개념이 없어서, 멀티 지점 사용자는 여기 예외로 적는다: "userId:bid,bid;userId:bid" (예: "12:1,3;45:2,4").
+    # LMS 가 사용자-지점 매핑 테이블을 만들면 이 설정은 제거하고 그 테이블을 읽는다.
+    RECORDING_MULTI_BRANCH_USERS: str = ""
 
     # --- Check build (GET /app/version-check, 학생 앱 서버와 같은 이름) ---
     # 스토어에 라이브된 버전·빌드. 앱 버전이 이보다 낮으면 강제 업데이트, 같은 버전인데 빌드가 낮으면 스토어 안내.

@@ -28,28 +28,21 @@ def _today() -> date:
 
 @router.get("/branches", response_model=list[BranchOut])
 async def branches(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """일정 선택 시트의 지점 목록 (전 지점)."""
-    return await recording_session_service.list_branches(db)
+    """일정 선택 시트의 지점 목록 — 접근 가능한 지점만 (HQ 전부 / 그 외 본인 지점 + env 예외)."""
+    return await recording_session_service.list_branches(db, current_user)
 
 
 @router.get("/sessions", response_model=list[RecordingSessionOut])
 async def sessions(
     type: str = Query(..., pattern="^(tutoring|class)$"),
     date_: date | None = Query(None, alias="date", description="기본 오늘(ET)"),
-    bid: int | None = Query(None, description="지점. 생략 = 내 지점, 0 = 전체"),
+    bid: int | None = Query(None, description="지점. 생략 = 내 지점, 0 = 접근 가능한 전체. 범위 밖 지점은 403"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Tutoring(t_tutorschedule) / Class(t_classdate) 일정 목록 — 녹음을 어느 일정에 붙일지 고르는 용도.
-    LMS recording 사이트의 목록과 같은 SQL. 로그인 사용자가 담당 교사인 일정(mine)이 앞에 온다."""
-    d = date_ or _today()
-    if bid is None:
-        bid_filter = current_user.bid
-    elif bid == 0:
-        bid_filter = None
-    else:
-        bid_filter = bid
-    return await recording_session_service.list_sessions(db, current_user, type, d, bid_filter)
+    LMS recording 사이트의 목록과 같은 SQL. 지점 범위: HQ 전부, 그 외 본인 지점(+env 예외). 담당 교사 일정(mine)이 앞."""
+    return await recording_session_service.list_sessions(db, current_user, type, date_ or _today(), bid)
 
 
 
