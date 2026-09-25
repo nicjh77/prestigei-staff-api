@@ -23,13 +23,13 @@ async def _lifespan(_: FastAPI):
             os.makedirs(settings.UPLOAD_TMP_DIR, exist_ok=True)
             probe = tempfile.TemporaryFile(dir=settings.UPLOAD_TMP_DIR); probe.close()
             tempfile.tempdir = settings.UPLOAD_TMP_DIR
-            print(f"[startup] upload temp dir: {settings.UPLOAD_TMP_DIR}")
+            print(f"[startup] upload temp dir: {settings.UPLOAD_TMP_DIR}", flush=True)
         except OSError as e:
-            print(f"[startup] WARNING: UPLOAD_TMP_DIR {settings.UPLOAD_TMP_DIR!r} unusable ({e}); using system temp")
+            print(f"[startup] WARNING: UPLOAD_TMP_DIR {settings.UPLOAD_TMP_DIR!r} unusable ({e}); using system temp", flush=True)
     # 이전 프로세스가 죽으며 남긴 녹음 임시 파일(rec_*) 정리 — 서버에 음성을 남기지 않는다
     n = sweep_temp_files()
     if n:
-        print(f"[startup] removed {n} leftover recording temp file(s)")
+        print(f"[startup] removed {n} leftover recording temp file(s)", flush=True)
     yield
 
 

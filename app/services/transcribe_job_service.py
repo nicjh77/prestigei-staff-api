@@ -85,11 +85,11 @@ async def _run(job: TranscribeJob, tmp_path: str, filename: str, content_type: s
             job.transcript = result["transcript"]
             job.duration_ms = result["duration_ms"]
             job.status = "done"
-        print(f"[transcribe] job {job.id} {job.status}: {result['phrases_count']} phrases, audio {result['duration_ms']} ms, azure {result['azure_ms']} ms")
+        print(f"[transcribe] job {job.id} {job.status}: {result['phrases_count']} phrases, audio {result['duration_ms']} ms, azure {result['azure_ms']} ms", flush=True)
     except Exception as e:  # noqa: BLE001 — 실패 사유를 앱에 그대로 보여준다(키 없음)
         job.status = "failed"
         job.error = str(e)[:300]
-        print(f"[transcribe] job {job.id} failed: {job.error}")
+        print(f"[transcribe] job {job.id} failed: {job.error}", flush=True)
     finally:
         job.finished = time.monotonic()
         try:
