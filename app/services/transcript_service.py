@@ -24,11 +24,11 @@ _RECENT_TTL = 3600
 APPEND_SEPARATOR = "\n\n"
 
 
-def _remember(client_id: str, out: TranscriptSaveOut) -> TranscriptSaveOut:
+def _remember(key: str, out: TranscriptSaveOut) -> TranscriptSaveOut:
     now = time.monotonic()
     for k in [k for k, (t, _) in _recent.items() if now - t > _RECENT_TTL]:
         _recent.pop(k, None)
-    _recent[client_id] = (now, out)
+    _recent[key] = (now, out)
     return out
 
 
@@ -46,18 +46,33 @@ async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict,
     return TranscriptSaveOut(table=table, id=int(row.id), action="appended" if existing else "inserted")
 
 
-async def save_transcript(db: AsyncSession, data: TranscriptSaveIn) -> TranscriptSaveOut:
-    cached = _recent.get(data.client_id)
+async def _assert_session_exists(db: AsyncSession, data: TranscriptSaveIn) -> None:
+    """앱이 보낸 일정 키가 실제 LMS 일정인지 — 임의 숫자로 쓰레기 행이 생기지 않게 (웹은 검증 없음, 앱은 한다)."""
+    if data.type == "tutoring":
+        ok = (await db.execute(text("SELECT 1 FROM t_tutorschedule WHERE scid = :scid LIMIT 1"), {"scid": data.scid})).first()
+        if not ok:
+            raise HTTPException(status_code=404, detail="Tutoring session not found")
+    elif data.type == "class":
+        ok = (await db.execute(text("SELECT 1 FROM t_classdate WHERE cid = :cid AND cdid = :cdid LIMIT 1"), {"cid": data.cid, "cdid": data.cdid})).first()
+        if not ok:
+            raise HTTPException(status_code=404, detail="Class date not found")
+
+
+async def save_transcript(db: AsyncSession, user_id: int, data: TranscriptSaveIn) -> TranscriptSaveOut:
+    key = f"{user_id}:{data.client_id}"          # 사용자별로 격리 — 다른 사람의 client_id 를 재생해도 남의 결과가 안 보인다
+    cached = _recent.get(key)
     if cached:
         return cached[1].model_copy(update={"action": "duplicate"})
 
     if data.type == "tutoring":
         if data.scid is None:
             raise HTTPException(status_code=422, detail="scid is required for tutoring")
+        await _assert_session_exists(db, data)
         out = await _upsert_linked(db, "t_tutor_record", "scid = :scid", {"scid": data.scid}, data.transcript, "scid", ":scid")
     elif data.type == "class":
         if data.cid is None or data.cdid is None:
             raise HTTPException(status_code=422, detail="cid and cdid are required for class")
+        await _assert_session_exists(db, data)
         params = {"cid": data.cid, "cdid": data.cdid, "ctid": data.ctid or 0}
         out = await _upsert_linked(db, "t_class_record", "cid = :cid AND cdid = :cdid AND IFNULL(ctid, 0) = :ctid", params,
                                    data.transcript, "cid, cdid, ctid", ":cid, :cdid, :ctid")
@@ -72,4 +87,4 @@ async def save_transcript(db: AsyncSession, data: TranscriptSaveIn) -> Transcrip
             {"s": sessionid, "m": (data.student_name or "").strip(), "t": data.transcript, "ts": now_et()},
         )
         out = TranscriptSaveOut(table="t_meeting_record", id=int(r.lastrowid), action="inserted", sessionid=sessionid)
-    return _remember(data.client_id, out)
+    return _remember(key, out)

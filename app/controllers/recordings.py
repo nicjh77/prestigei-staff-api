@@ -68,7 +68,8 @@ async def transcribe(
     결과는 GET /recordings/transcribe/{job_id} 로 폴링. 텍스트 형식은 LMS recording 사이트와 동일."""
     if not azure_speech_service.is_configured():
         raise HTTPException(status_code=503, detail="Azure Speech is not configured")
-    suffix = os.path.splitext(audio.filename or "")[1] or ".m4a"
+    ext = os.path.splitext(audio.filename or "")[1].lower()
+    suffix = ext if ext in {".m4a", ".mp4", ".wav", ".mp3", ".aac", ".ogg", ".webm", ".flac"} else ".m4a"   # 클라이언트 문자열을 파일명에 그대로 쓰지 않는다
     fd, tmp_path = tempfile.mkstemp(prefix="rec_", suffix=suffix)
     size = 0
     try:
@@ -110,4 +111,4 @@ async def save_transcript(
 ):
     """변환된 텍스트를 LMS 녹취 테이블에 저장 — tutoring→t_tutor_record(scid, 이어붙임), class→t_class_record(cid,cdid,ctid),
     counseling→t_meeting_record(새 행). 제출(submitdate)된 일정은 409. 같은 client_id 재전송은 중복 저장 없이 이전 결과."""
-    return await transcript_service.save_transcript(db, data)
+    return await transcript_service.save_transcript(db, current_user.id, data)
