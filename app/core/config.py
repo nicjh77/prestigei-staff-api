@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # 값이 틀리거나 파일이 없어도 부팅은 막지 않는다 — 첫 발송 시점에만 읽히고, 실패해도 그 발송만 실패한다.
     FIREBASE_CREDENTIALS_PATH: str = ""
 
+    # Azure Speech (앱 Recording 텍스트 변환, 2026-09-25) — 키는 서버에만 두고 앱에는 10분짜리 임시 토큰만 내준다.
+    # 비우면 GET /recordings/azure-token 이 503 (변환만 비활성, 부팅·녹음은 정상).
+    AZURE_SPEECH_KEY: str = ""
+    AZURE_SPEECH_REGION: str = ""
+
     # --- Check build (GET /app/version-check, 학생 앱 서버와 같은 이름) ---
     # 스토어에 라이브된 버전·빌드. 앱 버전이 이보다 낮으면 강제 업데이트, 같은 버전인데 빌드가 낮으면 스토어 안내.
     # VERSION 빈 값 = 그 플랫폼은 체크 안 함. BUILD 0 = 빌드 비교 안 함.

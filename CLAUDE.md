@@ -233,12 +233,22 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 - **전 지점 검색** (상담은 지점을 넘나듦). `fullname`/`fname`/`lname` LIKE 부분 일치(와일드카드 이스케이프), 앞글자 일치 우선 → 이름순. 개인정보(전화·이메일·메모)는 절대 반환하지 않는다.
 - 녹음 파일 자체는 아직 서버에 올리지 않는다 — 앱이 폰에만 저장하고 업로드 버튼은 자리만 있음(2026-09-25 결정, 서버 저장 설계는 이후 별도).
 
-## Recordings (session lists only)
+## Recordings (앱 녹음 → 텍스트, 2026-09-25)
 
-`GET /api/v1/recordings/sessions?type=tutoring|class&date=&bid=` / `GET /api/v1/recordings/branches` (auth: `get_current_user`). 앱 Recording 화면에서 Tutoring/Class 녹음을 어느 LMS 일정에 붙일지 고르는 목록. Code: `app/services/recording_session_service.py`(raw SQL), `app/controllers/recordings.py`, `app/schemas/recording.py`.
-- SQL은 **LMS recording 사이트(recording.prestigei.com, Node `server.js`)의 `/api/tutor-schedules`·`/api/class-schedules`를 그대로 옮긴 것** — 튜터링 = `t_tutorschedule`(scid, 학생·교사·출석·메모), 수업 = `t_classdate × t_classmain × t_classteacher`(cid, cdid, ctid — ctid는 NULL 가능). 그 사이트는 이 키로 `t_tutor_record`/`t_class_record`에 STT 텍스트를 저장하므로, 앱도 같은 키를 폰에 보관해 두었다가 나중에 업로드할 때 넘긴다.
-- `date` 기본 오늘(ET), `bid` 생략 = 내 지점, `0` = 전체. 로그인 사용자의 `t_user.tid`가 담당 교사인 일정은 `mine=true`로 앞에 정렬.
-- 업로드·Azure STT·LMS 테이블 쓰기는 없다(오너 결정 2026-09-25: 우선 가짜 버튼). 붙일 때 방향은 B안 = 앱 m4a 업로드 → 서버 배치 변환(Azure 키는 LMS 쪽 보유) — 앱 CLAUDE.md "Recording 메모" 참조.
+앱 Recording 화면(1.5.0)의 서버 API. **음성은 서버에 저장하지 않는다** (오너 결정 — LMS 서버 사정): 앱이 폰에 m4a 보관(30일), 전송 시 서버가 파일을 임시로 받아 **Azure Fast Transcription** 에 넘기고 즉시 삭제, 텍스트만 남긴다. Code: `app/controllers/recordings.py`, `app/services/azure_speech_service.py`(Azure 호출·텍스트 포맷), `app/services/transcribe_job_service.py`(in-memory 잡), `app/services/recording_session_service.py`(일정 목록, raw SQL), `app/schemas/recording.py` / `transcribe.py`.
+
+**설계 이력 (재론 방지):** 처음엔 "앱이 Azure 에 직접 올리고 서버는 임시 토큰만" 이었으나, **Azure STS 토큰(`sts/v1.0/issueToken`)은 실시간 엔드포인트에서만 통하고 Fast Transcription REST 는 구독 키(또는 Entra ID)만 받는다** (2026-09-25 eastus2 실측: 키 → 200, 토큰 → 401 "audience is incorrect"). 키를 앱에 넣을 수 없으므로 서버 중계로 확정. 실시간 스트리밍(웹 방식)은 폰 백그라운드 소켓·비용(배치의 ~5배)·통화 끼어들기 때문에 채택 안 함.
+
+**Endpoints** (`/api/v1/recordings`, auth: `get_current_user`):
+- `POST /transcribe` — multipart `audio`(m4a/wav/mp3, ≤300MB·≤2h) + `language`(사이트 드롭다운과 같은 7개, 기본 `en-US`) + `mode`(`speech` 단일 화자 / `conversation` 화자 분리, 기본 conversation) → **202 `{job_id, status:"queued"}`**. 파일은 `tempfile` 로 받아 BackgroundTasks 에서 Azure 호출 후 **finally 삭제**. 요청 안에서 기다리지 않는 이유: 1시간 파일 변환 1~3분 → Apache 프록시 유휴 타임아웃(기본 60초)에 걸린다.
+- `GET /transcribe/{job_id}` — `{status: queued|running|done|failed, transcript, duration_ms, error}`. 본인 잡만. 잡은 프로세스 메모리(1시간 보관) — **재시작하면 사라져 404** → 앱은 폰의 파일로 다시 올린다. 단일 프로세스 전제(워커 늘리면 DB 잡 테이블로 바꿔야 함).
+- `GET /sessions?type=tutoring|class&date=&bid=` / `GET /branches` — Tutoring/Class 녹음을 붙일 LMS 일정 목록. SQL은 **LMS recording 사이트(recording.prestigei.com, Node `server.js`)의 `/api/tutor-schedules`·`/api/class-schedules` 그대로** (튜터링 `t_tutorschedule` scid / 수업 `t_classdate×t_classmain×t_classteacher` cid,cdid,ctid — ctid NULL 가능). `date` 기본 오늘(ET), `bid` 생략=내 지점, `0`=전체, 로그인 사용자 `t_user.tid` 담당 일정은 `mine=true` 우선.
+
+**텍스트 형식 = LMS 사이트와 동일** (LMS 화면이 그대로 읽도록, `azure_speech_service.format_transcript`): 문장마다 줄바꿈, conversation 이면 `Guest-{n}: 문장`(Azure speaker 번호), speech 면 접두어 없음. 타임스탬프 없음. 실측(TTS 2인 음성 11초): 변환 1.5~1.7초, 화자 Guest-1/Guest-2 분리 정상.
+
+**설정**: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`(=`eastus2`, LMS 사이트와 같은 구독). 비우면 `/transcribe` 503, 나머지는 정상. **키 값은 로그·응답에 절대 싣지 않는다.** 서버 `.env` 에 두 줄 추가 필요(배포 시).
+
+**예정 (다음 단계)**: `POST /recordings/transcript` — 앱이 받은 텍스트 + 타입·일정 키를 보내면 LMS 테이블에 저장. 규칙(오너 확정, 웹과 동일): 튜터 `t_tutor_record(scid)` / 수업 `t_class_record(cid,cdid,ctid)` 는 **행 1개, 두 번째 녹음은 기존 transcript 뒤에 이어붙임**, 앱은 `upddate` 만 갱신하고 `submitdate`(제출)는 LMS 몫 — 이미 제출된 일정이면 거부. 상담은 `t_meeting_record(sessionid=yyyymmddhhmi 시작시각, sessionmemo=학생명)` 매번 새 행. 일정 없이 녹음한 건은 (미정) 우리 테이블.
 
 ## Daily Log / Task Report
 
