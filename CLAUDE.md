@@ -248,7 +248,7 @@ Read-only holiday feed over `t_datelist`(공휴일) + `t_holiday`(지점 휴일)
 
 **설정**: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`(=`eastus2`, LMS 사이트와 같은 구독). 비우면 `/transcribe` 503, 나머지는 정상. **키 값은 로그·응답에 절대 싣지 않는다.** 서버 `.env` 에 두 줄 추가 필요(배포 시).
 
-**예정 (다음 단계)**: `POST /recordings/transcript` — 앱이 받은 텍스트 + 타입·일정 키를 보내면 LMS 테이블에 저장. 규칙(오너 확정, 웹과 동일): 튜터 `t_tutor_record(scid)` / 수업 `t_class_record(cid,cdid,ctid)` 는 **행 1개, 두 번째 녹음은 기존 transcript 뒤에 이어붙임**, 앱은 `upddate` 만 갱신하고 `submitdate`(제출)는 LMS 몫 — 이미 제출된 일정이면 거부. 상담은 `t_meeting_record(sessionid=yyyymmddhhmi 시작시각, sessionmemo=학생명)` 매번 새 행. 일정 없이 녹음한 건은 (미정) 우리 테이블.
+**예정 (다음 단계)**: `POST /recordings/transcript` — 앱이 받은 텍스트 + 타입·일정 키를 보내면 LMS 테이블에 저장. 규칙(오너 확정, 웹과 동일): 튜터 `t_tutor_record(scid)` / 수업 `t_class_record(cid,cdid,ctid)` 는 **행 1개, 두 번째 녹음은 기존 transcript 뒤에 이어붙임**, 앱은 `upddate` 만 갱신하고 `submitdate`(제출)는 LMS 몫 — 이미 제출된 일정이면 거부. 상담은 `t_meeting_record(sessionid=yyyymmddhhmi 시작시각, sessionmemo=학생명)` 매번 새 행. **일정 없는 튜터·수업 녹음은 없다**(앱이 일정 필수 — 웹과 동일, 오너 확정 2026-09-25) → `t_meeting_record` 에는 상담만 들어간다.
 
 ## Daily Log / Task Report
 
