@@ -6,8 +6,10 @@
 - Counseling → t_meeting_record(sessionid = 시작시각 yyyymmddhhmi, sessionmemo = 학생명 또는 '') 매번 새 행.
   같은 분에 두 건이면 sessionid 에 초까지 붙여 구분.
 - generated / sentdate / sentto 는 LMS 몫 — 건드리지 않는다 (`generated` 는 MySQL 예약어).
-- 중복 방지: client_id(앱 항목 id) 별 결과를 1시간 기억 → 재전송이면 다시 쓰지 않고 이전 결과 반환.
-  (LMS 테이블에 유니크 제약이 없어 서버가 막아야 한다.)
+- 중복 방지: (user_id, client_id) 별 결과를 1시간 기억 → 재전송이면 다시 쓰지 않고 이전 결과 반환.
+  (LMS 테이블에 유니크 제약이 없어 서버가 막아야 한다.) 기억은 컨트롤러가 **커밋 성공 후** `remember()` 로 한다.
+- 권한 범위(제품 결정, 웹과 동일): 어느 직원이든 어느 지점·교사의 튜터/수업 일정에나 저장할 수 있다 — 상담사가 지점을 넘나들고
+  웹 사이트도 제한이 없다. 대신 일정 키가 실제 LMS 행인지(scid / cid+cdid / ctid∈t_classteacher)는 검증한다.
 """
 import time
 from datetime import datetime
@@ -24,12 +26,20 @@ _RECENT_TTL = 3600
 APPEND_SEPARATOR = "\n\n"
 
 
-def _remember(key: str, out: TranscriptSaveOut) -> TranscriptSaveOut:
+def _key(user_id: int, client_id: str) -> str:
+    return f"{user_id}:{client_id}"       # 사용자별 격리 — 남의 client_id 를 재생해도 남의 결과가 안 보인다
+
+
+def recall(user_id: int, client_id: str) -> TranscriptSaveOut | None:
+    hit = _recent.get(_key(user_id, client_id))
+    return hit[1].model_copy(update={"action": "duplicate"}) if hit else None
+
+
+def remember(user_id: int, client_id: str, out: TranscriptSaveOut) -> None:
     now = time.monotonic()
     for k in [k for k, (t, _) in _recent.items() if now - t > _RECENT_TTL]:
         _recent.pop(k, None)
-    _recent[key] = (now, out)
-    return out
+    _recent[_key(user_id, client_id)] = (now, out)
 
 
 async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict, transcript: str, insert_cols: str, insert_vals: str) -> TranscriptSaveOut:
@@ -56,14 +66,14 @@ async def _assert_session_exists(db: AsyncSession, data: TranscriptSaveIn) -> No
         ok = (await db.execute(text("SELECT 1 FROM t_classdate WHERE cid = :cid AND cdid = :cdid LIMIT 1"), {"cid": data.cid, "cdid": data.cdid})).first()
         if not ok:
             raise HTTPException(status_code=404, detail="Class date not found")
+        if data.ctid:
+            ok = (await db.execute(text("SELECT 1 FROM t_classteacher WHERE ctid = :ctid AND cid = :cid LIMIT 1"), {"ctid": data.ctid, "cid": data.cid})).first()
+            if not ok:
+                raise HTTPException(status_code=404, detail="Class teacher row not found")
 
 
-async def save_transcript(db: AsyncSession, user_id: int, data: TranscriptSaveIn) -> TranscriptSaveOut:
-    key = f"{user_id}:{data.client_id}"          # 사용자별로 격리 — 다른 사람의 client_id 를 재생해도 남의 결과가 안 보인다
-    cached = _recent.get(key)
-    if cached:
-        return cached[1].model_copy(update={"action": "duplicate"})
-
+async def save_transcript(db: AsyncSession, data: TranscriptSaveIn) -> TranscriptSaveOut:
+    """DB 쓰기만 한다. 커밋과 중복 캐시 기록은 컨트롤러 몫 (recall → save → commit → remember)."""
     if data.type == "tutoring":
         if data.scid is None:
             raise HTTPException(status_code=422, detail="scid is required for tutoring")
@@ -87,4 +97,4 @@ async def save_transcript(db: AsyncSession, user_id: int, data: TranscriptSaveIn
             {"s": sessionid, "m": (data.student_name or "").strip(), "t": data.transcript, "ts": now_et()},
         )
         out = TranscriptSaveOut(table="t_meeting_record", id=int(r.lastrowid), action="inserted", sessionid=sessionid)
-    return _remember(key, out)
+    return out

@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     # 값이 틀리거나 파일이 없어도 부팅은 막지 않는다 — 첫 발송 시점에만 읽히고, 실패해도 그 발송만 실패한다.
     FIREBASE_CREDENTIALS_PATH: str = ""
 
-    # Azure Speech (앱 Recording 텍스트 변환, 2026-09-25) — 키는 서버에만 두고 앱에는 10분짜리 임시 토큰만 내준다.
-    # 비우면 GET /recordings/azure-token 이 503 (변환만 비활성, 부팅·녹음은 정상).
+    # Azure Speech (앱 Recording 텍스트 변환, 2026-09-25) — 키는 서버에만 있고 서버가 파일을 Azure 로 중계한다 (앱에 키·토큰 없음).
+    # 비우면 POST /recordings/transcribe 가 503 (변환만 비활성, 부팅·녹음은 정상).
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = ""
 
