@@ -23,7 +23,7 @@ from fastapi import HTTPException
 from app.services import azure_speech_service
 
 JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
-AZURE_CONCURRENCY = 2
+AZURE_CONCURRENCY = 4          # 동시 4건 — 수업·상담이 같은 시각에 끝나 10건이 몰려도 마지막 대기가 ~10분 이내
 TEMP_PREFIX = "rec_"
 _jobs: dict[str, "TranscribeJob"] = {}
 _azure_slots = asyncio.Semaphore(AZURE_CONCURRENCY)
