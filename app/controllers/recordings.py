@@ -11,7 +11,7 @@ from app.core.constants import APP_TZ
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.recording import BranchOut, RecordingSessionOut
+from app.schemas.recording import BranchAccessOut, RecordingSessionOut
 from app.schemas.transcribe import TranscribeJobOut
 from app.schemas.transcript import TranscriptSaveIn, TranscriptSaveOut
 from app.services import azure_speech_service, recording_session_service, transcribe_job_service, transcript_service
@@ -26,9 +26,9 @@ def _today() -> date:
     return datetime.now(APP_TZ).date()
 
 
-@router.get("/branches", response_model=list[BranchOut])
+@router.get("/branches", response_model=BranchAccessOut)
 async def branches(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """일정 선택 시트의 지점 목록 — 접근 가능한 지점만 (HQ 전부 / 그 외 본인 지점 + env 예외)."""
+    """일정 선택 시트의 지점 목록 — 접근 가능한 지점만 (본인 소속 + t_permission_income 권한; 'HQ' 권한/HQ 소속은 전부)."""
     return await recording_session_service.list_branches(db, current_user)
 
 
@@ -36,12 +36,12 @@ async def branches(current_user: User = Depends(get_current_user), db: AsyncSess
 async def sessions(
     type: str = Query(..., pattern="^(tutoring|class)$"),
     date_: date | None = Query(None, alias="date", description="기본 오늘(ET)"),
-    bid: int | None = Query(None, description="지점. 생략 = 내 지점, 0 = 접근 가능한 전체. 범위 밖 지점은 403"),
+    bid: int | None = Query(None, description="지점. 생략 = 본인 소속(HQ 소속은 전체), 0 = 접근 가능한 전체. 범위 밖 지점은 403"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Tutoring(t_tutorschedule) / Class(t_classdate) 일정 목록 — 녹음을 어느 일정에 붙일지 고르는 용도.
-    LMS recording 사이트의 목록과 같은 SQL. 지점 범위: HQ 전부, 그 외 본인 지점(+env 예외). 담당 교사 일정(mine)이 앞."""
+    LMS recording 사이트의 목록과 같은 SQL. 지점 범위 = 본인 소속 + t_permission_income 권한('HQ' → 전부). 담당 교사 일정(mine)이 앞."""
     return await recording_session_service.list_sessions(db, current_user, type, date_ or _today(), bid)
 
 
