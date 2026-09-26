@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from fastapi import HTTPException
 
+from app.core.config import settings
 from app.services import azure_speech_service
 
 JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
@@ -92,6 +93,16 @@ async def _run(job: TranscribeJob, tmp_path: str, filename: str, content_type: s
         print(f"[transcribe] job {job.id} failed: {job.error}", flush=True)
     finally:
         job.finished = time.monotonic()
+        if job.status == "failed" and settings.KEEP_FAILED_UPLOADS == "1":
+            # 디버그 보관 — 분석 후 삭제할 것
+            try:
+                keep_dir = os.path.join(tempfile.gettempdir(), "failed")
+                os.makedirs(keep_dir, exist_ok=True)
+                dest = os.path.join(keep_dir, f"{job.id}{os.path.splitext(tmp_path)[1]}")
+                os.replace(tmp_path, dest)
+                print(f"[transcribe] kept failed upload for analysis: {dest}", flush=True)
+            except OSError as e:
+                print(f"[transcribe] could not keep failed upload: {e}", flush=True)
         try:
             os.remove(tmp_path)
         except OSError:

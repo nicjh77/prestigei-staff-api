@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # 메모리를 먹는다 → 실제 디스크 경로를 준다 (예: /var/www/staff-app/tmp, svc-node 소유). Starlette 의 수신 임시본과
     # 우리 rec_* 둘 다 이 경로를 쓴다 (main.py 가 tempfile.tempdir 로 지정).
     UPLOAD_TMP_DIR: str = ""
+    # 디버그: Azure 가 거절한(변환 실패) 업로드 파일을 지우지 않고 <임시폴더>/failed/ 에 남긴다 ("1"). 원인 분석 후 반드시 비울 것 —
+    # 서버에 음성을 남기지 않는다는 원칙의 유일한 예외 (2026-09-25, 49분 파일 Azure 422 InvalidAudioFormat 분석용).
+    KEEP_FAILED_UPLOADS: str = ""
 
     # --- Check build (GET /app/version-check, 학생 앱 서버와 같은 이름) ---
     # 스토어에 라이브된 버전·빌드. 앱 버전이 이보다 낮으면 강제 업데이트, 같은 버전인데 빌드가 낮으면 스토어 안내.
