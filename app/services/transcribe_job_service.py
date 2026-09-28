@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from fastapi import HTTPException
 
 from app.core.config import settings
-from app.services import azure_speech_service
+from app.schemas.transcript import TranscriptMeta, TranscriptSaveOut
+from app.services import azure_speech_service, transcript_service
 from app.utils.mp4_faststart import ensure_faststart
 
 JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
@@ -39,6 +40,8 @@ class TranscribeJob:
     transcript: str | None = None
     duration_ms: int | None = None
     error: str | None = None
+    meta: TranscriptMeta | None = None          # 저장 메타 (2026-09-28: 서버가 변환 직후 LMS 에 저장)
+    saved: TranscriptSaveOut | None = None
     created: float = field(default_factory=time.monotonic)
     finished: float | None = None
     task: asyncio.Task | None = field(default=None, repr=False)   # strong ref — create_task 결과가 GC 되지 않게
@@ -50,11 +53,11 @@ def _sweep() -> None:
         _jobs.pop(k, None)
 
 
-def create(user_id: int) -> TranscribeJob:
+def create(user_id: int, meta: TranscriptMeta | None = None) -> TranscribeJob:
     _sweep()
     if any(j.user_id == user_id and j.finished is None for j in _jobs.values()):
         raise HTTPException(status_code=429, detail="A transcription is already running for this account. Wait for it to finish.")
-    job = TranscribeJob(id=secrets.token_urlsafe(12), user_id=user_id)
+    job = TranscribeJob(id=secrets.token_urlsafe(12), user_id=user_id, meta=meta)
     _jobs[job.id] = job
     return job
 
@@ -87,14 +90,27 @@ async def _run(job: TranscribeJob, tmp_path: str, filename: str, content_type: s
             job.status = "running"
             result = await azure_speech_service.transcribe_file(tmp_path, filename, content_type, locale, diarize, max_speakers)
         if not result["transcript"].strip():
-            # Azure 가 아무 문장도 못 찾음(무음·잡음) — done+빈 텍스트로 주면 앱이 저장 단계에서 422 를 맞는다 → 명시적으로 실패
+            # Azure 가 아무 문장도 못 찾음(무음·잡음) → 명시적으로 실패 (저장할 것이 없다)
             job.status = "failed"
             job.error = "No speech detected in the recording."
         else:
             job.transcript = result["transcript"]
             job.duration_ms = result["duration_ms"]
-            job.status = "done"
-        print(f"[transcribe] job {job.id} {job.status}: {result['phrases_count']} phrases, audio {result['duration_ms']} ms, azure {result['azure_ms']} ms", flush=True)
+            if job.meta is not None:
+                # 변환 직후 서버가 직접 LMS 테이블에 저장 — 앱이 꺼져 있어도 여기서 끝난다 (오너 2026-09-28)
+                try:
+                    job.saved = await transcript_service.save_after_transcription(job.user_id, job.meta, job.transcript)
+                    job.status = "done"
+                except HTTPException as e:          # 409 제출됨 / 404 일정 없음 등 — 텍스트는 앱에 보여주되 저장 실패로
+                    job.status = "failed"
+                    job.error = f"Transcribed but not saved to the LMS: {e.detail}"
+                except Exception as e:  # noqa: BLE001
+                    job.status = "failed"
+                    job.error = f"Transcribed but not saved to the LMS: {str(e)[:200]}"
+            else:
+                job.status = "done"
+        saved_note = f", saved {job.saved.table}#{job.saved.id} ({job.saved.action})" if job.saved else (f", NOT saved: {job.error}" if job.transcript and job.status == "failed" else "")
+        print(f"[transcribe] job {job.id} {job.status}: {result['phrases_count']} phrases, audio {result['duration_ms']} ms, azure {result['azure_ms']} ms{saved_note}", flush=True)
     except Exception as e:  # noqa: BLE001 — 실패 사유를 앱에 그대로 보여준다(키 없음)
         job.status = "failed"
         job.error = str(e)[:300]

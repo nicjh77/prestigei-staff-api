@@ -13,7 +13,7 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.recording import BranchAccessOut, RecordingSessionOut
 from app.schemas.transcribe import TranscribeJobOut
-from app.schemas.transcript import TranscriptSaveIn, TranscriptSaveOut
+from app.schemas.transcript import TranscriptMeta, TranscriptSaveIn, TranscriptSaveOut
 from app.services import azure_speech_service, recording_session_service, transcribe_job_service, transcript_service
 
 # 앱 Recording API. 음성은 서버에 **저장하지 않는다** (2026-09-25 오너 결정, LMS 서버 사정):
@@ -59,7 +59,7 @@ async def _reject_oversized_body(request: Request) -> None:
 
 
 def _job_out(job) -> TranscribeJobOut:
-    return TranscribeJobOut(job_id=job.id, status=job.status, transcript=job.transcript, duration_ms=job.duration_ms, error=job.error)
+    return TranscribeJobOut(job_id=job.id, status=job.status, transcript=job.transcript, duration_ms=job.duration_ms, error=job.error, saved=job.saved)
 
 
 @router.post(
@@ -73,15 +73,43 @@ async def transcribe(
     language: str = Form("en-US", pattern=_LANGUAGE_PATTERN, description="ko-KR | en-US | ja-JP | zh-CN | es-ES | fr-FR | de-DE"),
     mode: str = Form("conversation", pattern="^(speech|conversation)$", description="speech=단일 화자, conversation=화자 분리"),
     max_speakers: int = Form(2, ge=2, le=8, description="conversation 일 때 최대 화자 수 (상담·튜터링 2, 수업 4)"),
+    # 저장 메타 (2026-09-28: 서버가 변환 직후 LMS 에 저장) — 없으면 구 방식(변환만, 앱이 /transcript 로 저장)
+    client_id: str | None = Form(None),
+    type: str | None = Form(None),
+    started_at: str | None = Form(None),
+    student_name: str | None = Form(None),
+    scid: int | None = Form(None),
+    cid: int | None = Form(None),
+    cdid: int | None = Form(None),
+    ctid: int | None = Form(None),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """녹음 파일을 Azure 로 넘겨 텍스트로 변환하는 잡을 만든다 (202 + job_id). 파일은 변환 직후 서버에서 삭제.
-    결과는 GET /recordings/transcribe/{job_id} 로 폴링. 텍스트 형식은 LMS recording 사이트와 동일.
-    사용자당 동시 1건(429), IP 당 시간당 30건(429)."""
+    """녹음 파일을 Azure 로 넘겨 텍스트로 변환하고, 메타(client_id/type/…)가 있으면 **서버가 변환 직후 LMS 테이블에 저장**한다
+    (202 + job_id; 앱이 꺼져 있어도 끝까지 진행). 파일은 변환 직후 서버에서 삭제. 결과는 GET /recordings/transcribe/{job_id} 로 폴링
+    (`saved` 에 저장 위치). 같은 client_id 재전송은 Azure 없이 즉시 done(duplicate). 사용자당 동시 1건(429), IP 당 시간당 30건(429)."""
     if not azure_speech_service.is_configured():
         raise HTTPException(status_code=503, detail="Azure Speech is not configured")
+    meta: TranscriptMeta | None = None
+    if client_id or type:
+        try:
+            meta = TranscriptMeta(client_id=client_id, type=type, started_at=started_at, student_name=student_name, scid=scid, cid=cid, cdid=cdid, ctid=ctid)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"Invalid recording metadata: {e}")
+        # 이미 저장된 녹음의 재전송 → Azure 를 부르지 않고 바로 완료로 (중복 저장·과금 방지)
+        prior = transcript_service.recall(current_user.id, meta.client_id)
+        if prior:
+            job = transcribe_job_service.create(current_user.id, meta)
+            job.status, job.saved, job.finished = "done", prior, __import__("time").monotonic()
+            return _job_out(job)
+        # 일정 키가 실제 LMS 행인지 — 변환 비용을 쓰기 전에 거절 (404)
+        if meta.type == "tutoring" and meta.scid is None:
+            raise HTTPException(status_code=422, detail="scid is required for tutoring")
+        if meta.type == "class" and (meta.cid is None or meta.cdid is None):
+            raise HTTPException(status_code=422, detail="cid and cdid are required for class")
+        await transcript_service.assert_session_exists(db, meta)
     # 잡 슬롯을 파일 복사 전에 잡는다 — 동시 1건 초과면 300MB 를 받아 놓고 거절하는 낭비가 없게
-    job = transcribe_job_service.create(current_user.id)
+    job = transcribe_job_service.create(current_user.id, meta)
     ext = os.path.splitext(audio.filename or "")[1].lower()
     suffix = ext if ext in {".m4a", ".mp4", ".wav", ".mp3", ".aac", ".ogg", ".webm", ".flac"} else ".m4a"   # 클라이언트 문자열을 파일명에 그대로 쓰지 않는다
     fd, tmp_path = tempfile.mkstemp(prefix="rec_", suffix=suffix)
@@ -136,3 +164,12 @@ async def save_transcript(
     await db.commit()
     transcript_service.remember(current_user.id, data.client_id, out)
     return out
+
+
+@router.get("/transcript/{client_id}", response_model=TranscriptSaveOut)
+async def transcript_status(client_id: str, current_user: User = Depends(get_current_user)):
+    """이 녹음(앱 client_id)이 LMS 에 저장됐는지 — 잡이 만료(1시간)된 뒤 앱이 다시 열렸을 때 확인용. 기록은 30일 보관. 없으면 404."""
+    saved = transcript_service.recall(current_user.id, client_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No saved transcript for this recording")
+    return saved
