@@ -82,6 +82,7 @@ async def transcribe(
     cid: int | None = Form(None),
     cdid: int | None = Form(None),
     ctid: int | None = Form(None),
+    save_mode: str = Form("append", pattern="^(append|replace)$", description="tutoring/class 에 기존 녹취가 있을 때 append(이어붙임) | replace(교체). 제출된 행은 둘 다 409"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -93,7 +94,7 @@ async def transcribe(
     meta: TranscriptMeta | None = None
     if client_id or type:
         try:
-            meta = TranscriptMeta(client_id=client_id, type=type, started_at=started_at, student_name=student_name, scid=scid, cid=cid, cdid=cdid, ctid=ctid)
+            meta = TranscriptMeta(client_id=client_id, type=type, started_at=started_at, student_name=student_name, scid=scid, cid=cid, cdid=cdid, ctid=ctid, save_mode=save_mode)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=f"Invalid recording metadata: {e}")
         # 이미 저장된 녹음의 재전송 → Azure 를 부르지 않고 바로 완료로 (중복 저장·과금 방지)

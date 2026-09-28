@@ -2,6 +2,7 @@
 
 - Tutoring → t_tutor_record(scid)   / Class → t_class_record(cid, cdid, ctid — 없으면 0, 웹과 동일)
   · 일정당 행 1개: 없으면 INSERT, 있으면 기존 transcript 뒤에 이어붙임 (웹의 "이전 녹취 불러오기 → 이어서" 경로)
+    save_mode='replace'(앱이 일정 선택 시 사용자에게 물어 정함, 2026-09-28)면 기존 텍스트를 버리고 새 텍스트로 UPDATE (행 id 유지).
   · submitdate 가 찍힌 행은 잠김 → 409 (웹도 수정 불가). 제출은 LMS 몫, 앱은 upddate 만 갱신.
 - Counseling → t_meeting_record(sessionid = 시작시각 yyyymmddhhmi, sessionmemo = 학생명 또는 '') 매번 새 행.
   같은 분에 두 건이면 sessionid 에 초까지 붙여 구분.
@@ -80,7 +81,8 @@ def remember(user_id: int, client_id: str, out: TranscriptSaveOut) -> None:
     _flush_store()
 
 
-async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict, transcript: str, insert_cols: str, insert_vals: str) -> TranscriptSaveOut:
+async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict, transcript: str, insert_cols: str, insert_vals: str,
+                         save_mode: str = "append") -> TranscriptSaveOut:
     row = (await db.execute(text(f"SELECT id, transcript, submitdate FROM {table} WHERE {where} ORDER BY id DESC LIMIT 1"), params)).first()
     ts = now_et()
     if row is None:
@@ -89,9 +91,13 @@ async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict,
     if row.submitdate is not None:
         raise HTTPException(status_code=409, detail="This session's transcript was already submitted in the LMS and is locked")
     existing = (row.transcript or "").rstrip()
-    merged = f"{existing}{APPEND_SEPARATOR}{transcript}" if existing else transcript
+    if save_mode == "replace":
+        # 사용자가 일정 선택 시 "Replace" 를 고른 경우 — 기존 텍스트(앱/웹 어느 쪽이 넣었든)를 버리고 새 텍스트로. 행은 그대로(id 유지).
+        merged, action = transcript, ("replaced" if existing else "inserted")
+    else:
+        merged, action = (f"{existing}{APPEND_SEPARATOR}{transcript}" if existing else transcript), ("appended" if existing else "inserted")
     await db.execute(text(f"UPDATE {table} SET transcript = :t, upddate = :ts WHERE id = :id"), {"t": merged, "ts": ts, "id": row.id})
-    return TranscriptSaveOut(table=table, id=int(row.id), action="appended" if existing else "inserted")
+    return TranscriptSaveOut(table=table, id=int(row.id), action=action)
 
 
 async def assert_session_exists(db: AsyncSession, data: TranscriptMeta) -> None:
@@ -116,14 +122,14 @@ async def save_transcript(db: AsyncSession, data: TranscriptSaveIn) -> Transcrip
         if data.scid is None:
             raise HTTPException(status_code=422, detail="scid is required for tutoring")
         await assert_session_exists(db, data)
-        out = await _upsert_linked(db, "t_tutor_record", "scid = :scid", {"scid": data.scid}, data.transcript, "scid", ":scid")
+        out = await _upsert_linked(db, "t_tutor_record", "scid = :scid", {"scid": data.scid}, data.transcript, "scid", ":scid", data.save_mode)
     elif data.type == "class":
         if data.cid is None or data.cdid is None:
             raise HTTPException(status_code=422, detail="cid and cdid are required for class")
         await assert_session_exists(db, data)
         params = {"cid": data.cid, "cdid": data.cdid, "ctid": data.ctid or 0}
         out = await _upsert_linked(db, "t_class_record", "cid = :cid AND cdid = :cdid AND IFNULL(ctid, 0) = :ctid", params,
-                                   data.transcript, "cid, cdid, ctid", ":cid, :cdid, :ctid")
+                                   data.transcript, "cid, cdid, ctid", ":cid, :cdid, :ctid", data.save_mode)
     else:
         started = datetime.fromisoformat(data.started_at)
         sessionid = started.strftime("%Y%m%d%H%M")

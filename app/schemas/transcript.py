@@ -13,6 +13,9 @@ class TranscriptMeta(BaseModel):
     cid: int | None = None           # class
     cdid: int | None = None
     ctid: int | None = None          # 없으면 0 으로 저장 (웹과 동일)
+    save_mode: str = Field(default="append", pattern="^(append|replace)$")
+    # tutoring/class 에 기존 녹취가 있을 때: append(기본) = 뒤에 이어붙임 / replace = 기존 텍스트를 지우고 새 텍스트로 (앱이 일정 선택 시
+    # 사용자에게 물어 정함, 2026-09-28). 제출(submitdate)된 행은 둘 다 409. counseling 은 매번 새 행이라 무시. 구 앱은 안 보냄 → append.
 
 
 class TranscriptSaveIn(TranscriptMeta):
@@ -31,5 +34,5 @@ class TranscriptSaveIn(TranscriptMeta):
 class TranscriptSaveOut(BaseModel):
     table: str          # t_tutor_record | t_class_record | t_meeting_record
     id: int
-    action: str         # inserted | appended | duplicate
+    action: str         # inserted | appended | replaced | duplicate
     sessionid: str | None = None
