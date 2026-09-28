@@ -169,7 +169,7 @@ async def save_transcript(
 
 @router.get("/transcript/{client_id}", response_model=TranscriptSaveOut)
 async def transcript_status(client_id: str, current_user: User = Depends(get_current_user)):
-    """이 녹음(앱 client_id)이 LMS 에 저장됐는지 — 잡이 만료(1시간)된 뒤 앱이 다시 열렸을 때 확인용. 기록은 30일 보관. 없으면 404."""
+    """이 녹음(앱 client_id)이 LMS 에 저장됐는지 — 잡이 만료(24시간)된 뒤 앱이 다시 열렸을 때 확인용. 기록은 30일 보관. 없으면 404."""
     saved = transcript_service.recall(current_user.id, client_id)
     if not saved:
         raise HTTPException(status_code=404, detail="No saved transcript for this recording")

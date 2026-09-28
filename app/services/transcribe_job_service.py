@@ -25,7 +25,7 @@ from app.schemas.transcript import TranscriptMeta, TranscriptSaveOut
 from app.services import azure_speech_service, transcript_service
 from app.utils.mp4_faststart import ensure_faststart
 
-JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
+JOB_TTL_SEC = 24 * 3600     # 끝난 잡의 메모리 기록(상태·텍스트) 보관 24시간 (2026-09-28 1h→24h: 저녁에 올리고 다음날 아침 폰에서 텍스트 확인). LMS 저장은 이미 끝난 뒤라 앱 표시용일 뿐 — 지나면 앱은 GET /transcript/{client_id}(30일) 로 'Saved' 만 확인. 건당 수십 KB.
 AZURE_CONCURRENCY = max(1, int(settings.AZURE_CONCURRENCY))   # .env 로 조정 (기본 10, 2026-09-28) — 30건이 몰려도 3차례, 마지막 건 ~5분
 TEMP_PREFIX = "rec_"
 _jobs: dict[str, "TranscribeJob"] = {}

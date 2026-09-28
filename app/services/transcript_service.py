@@ -7,7 +7,7 @@
 - Counseling → t_meeting_record(sessionid = 시작시각 yyyymmddhhmi, sessionmemo = 학생명 또는 '') 매번 새 행.
   같은 분에 두 건이면 sessionid 에 초까지 붙여 구분.
 - generated / sentdate / sentto 는 LMS 몫 — 건드리지 않는다 (`generated` 는 MySQL 예약어).
-- 중복 방지: (user_id, client_id) 별 결과를 1시간 기억 → 재전송이면 다시 쓰지 않고 이전 결과 반환.
+- 중복 방지: (user_id, client_id) 별 결과를 디스크 JSON 에 30일 기억 → 재전송이면 다시 쓰지 않고 이전 결과 반환.
   (LMS 테이블에 유니크 제약이 없어 서버가 막아야 한다.) 기억은 컨트롤러가 **커밋 성공 후** `remember()` 로 한다.
 - 권한 범위(제품 결정, 웹과 동일): 어느 직원이든 어느 지점·교사의 튜터/수업 일정에나 저장할 수 있다 — 상담사가 지점을 넘나들고
   웹 사이트도 제한이 없다. 대신 일정 키가 실제 LMS 행인지(scid / cid+cdid / ctid∈t_classteacher)는 검증한다.
@@ -31,7 +31,7 @@ APPEND_SEPARATOR = "\n\n"
 
 # ---- 저장 기록 (중복 방지) — 디스크 JSON, 30일 ----
 # 서버가 변환 직후 LMS 에 저장하므로(2026-09-28) 앱은 언제든 나중에 "이 녹음 저장됐나?" 를 물을 수 있어야 하고,
-# 앱이 같은 녹음을 다시 올려도 두 번 저장되면 안 된다(LMS 테이블에 유니크 제약 없음). 프로세스 메모리로는 재시작·1시간에 사라져 파일로 둔다.
+# 앱이 같은 녹음을 다시 올려도 두 번 저장되면 안 된다(LMS 테이블에 유니크 제약 없음). 프로세스 메모리로는 재시작·잡 TTL(24시간)에 사라져 파일로 둔다.
 _STORE_TTL_SEC = 30 * 24 * 3600
 _store: dict[str, dict] | None = None
 _store_lock = asyncio.Lock()
