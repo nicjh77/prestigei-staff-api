@@ -11,6 +11,9 @@ from app.models.user import User
 from app.schemas.recording import BranchAccessOut, BranchOut, RecordingSessionOut
 
 # LMS recording 사이트(recording.prestigei.com, server.js)의 /api/tutor-schedules · /api/class-schedules SQL을 그대로 옮긴 것.
+# + has_record / submitted (2026-09-28): 웹은 일정을 고르면 기존 녹취를 불러와 보여주지만 앱엔 그 단계가 없어, 목록에서 미리
+#   "이미 녹취 있음(이어붙음)" / "제출됨(잠김 → 저장 409)" 을 알려준다. 판정 기준은 transcript_service 의 저장 로직과 동일한 최신 행
+#   (일정 키로 id DESC LIMIT 1; class 는 cid+cdid+IFNULL(ctid,0)). 행이 없으면 둘 다 NULL → False.
 # 차이: 날짜 제한(오늘~내일)은 앱이 담당(어제/오늘/내일 칩), 지점은 bid int 로 받고, 로그인 교사의 일정(mine)을 앞에 둔다.
 # 읽기 전용 — 일정 데이터는 LMS 소유.
 #
@@ -28,7 +31,9 @@ _TUTOR_SQL = text("""
         CASE WHEN e.attendance_name = 'Scheduled'
               AND STR_TO_DATE(CONCAT(a.scdate, ' ', IFNULL(a.etime, '23:00')), '%Y-%m-%d %H:%i') < NOW()
              THEN 'Not checked' ELSE e.attendance_name END AS attendance,
-        CASE WHEN CONCAT(a.scdate, ' ', a.stime) < NOW() THEN 1 ELSE 0 END AS past
+        CASE WHEN CONCAT(a.scdate, ' ', a.stime) < NOW() THEN 1 ELSE 0 END AS past,
+        (SELECT IFNULL(r.transcript, '') <> '' FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS has_record,
+        (SELECT r.submitdate IS NOT NULL FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS submitted
     FROM t_tutorschedule a
         JOIN t_studentmain b ON a.sid = b.sid
         JOIN t_branch c ON a.bid = c.bid
@@ -49,7 +54,11 @@ _CLASS_SQL = text("""
         v.fullname AS teacher,
         a.sdate,
         CASE WHEN IFNULL(IFNULL(t.etime, a.etime), '') = '' THEN 0
-             WHEN CONCAT(a.sdate, ' ', IFNULL(IFNULL(t.etime, a.etime), '23:00')) < NOW() THEN 1 ELSE 0 END AS past
+             WHEN CONCAT(a.sdate, ' ', IFNULL(IFNULL(t.etime, a.etime), '23:00')) < NOW() THEN 1 ELSE 0 END AS past,
+        (SELECT IFNULL(r.transcript, '') <> '' FROM t_class_record r
+          WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS has_record,
+        (SELECT r.submitdate IS NOT NULL FROM t_class_record r
+          WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS submitted
     FROM t_classdate a
         JOIN t_classmain b ON a.cid = b.cid
         LEFT JOIN t_classteacher t ON a.cid = t.cid AND a.sdate = t.sdate AND t.stime <> ''
@@ -132,6 +141,7 @@ async def list_sessions(db: AsyncSession, user: User, kind: str, d: date, bid: i
                 branch=r.branch, bid=r.bid, date=str(r.scdate), start_time=_hhmm(r.stime), end_time=_hhmm(r.etime),
                 attendance=r.attendance, memo=r.memo or None, past=bool(r.past),
                 mine=(my_tid is not None and r.tid == my_tid),
+                has_record=bool(r.has_record), submitted=bool(r.submitted),
             )
             for r in rows
         ]
@@ -143,6 +153,7 @@ async def list_sessions(db: AsyncSession, user: User, kind: str, d: date, bid: i
                 branch=r.branch, bid=r.bid, date=str(r.sdate), start_time=_hhmm(r.stime), end_time=_hhmm(r.etime),
                 attendance=None, memo=None, past=bool(r.past),
                 mine=(my_tid is not None and r.tid == my_tid),
+                has_record=bool(r.has_record), submitted=bool(r.submitted),
             )
             for r in rows
         ]
