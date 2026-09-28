@@ -44,8 +44,8 @@ def format_transcript(phrases: list[dict], combined: list[dict], diarize: bool) 
     lines: list[str] = []
     for p in phrases:
         text = (p.get("text") or "").strip()
-        if not text:
-            continue
+        if not text or not any(ch.isalnum() for ch in text):
+            continue  # 구두점만 있는 문장(예: "Guest-2: .")은 버린다 - 49분 실측에서 여럿 나왔음
         if diarize and p.get("speaker") is not None:
             lines.append(f"Guest-{p['speaker']}: {text}")
         else:
