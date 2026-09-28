@@ -46,7 +46,7 @@ async def sessions(
 
 
 
-TRANSCRIBE_LIMIT, TRANSCRIBE_WINDOW = 30, 3600     # IP 당 시간당 30건 — 지점 Wi-Fi 공유를 감안한 넉넉한 값, 루프/버그만 차단 (Azure 과금)
+TRANSCRIBE_LIMIT, TRANSCRIBE_WINDOW = 60, 3600     # IP 당 시간당 60건 (2026-09-28 30→60: 피크에 전 지점 20~30수업, 큰 지점은 한 Wi-Fi) — 루프/버그만 차단 (Azure 과금)
 _LANGUAGE_PATTERN = "^(" + "|".join(sorted(azure_speech_service.SUPPORTED_LOCALES)) + ")$"
 
 
@@ -88,7 +88,7 @@ async def transcribe(
 ):
     """녹음 파일을 Azure 로 넘겨 텍스트로 변환하고, 메타(client_id/type/…)가 있으면 **서버가 변환 직후 LMS 테이블에 저장**한다
     (202 + job_id; 앱이 꺼져 있어도 끝까지 진행). 파일은 변환 직후 서버에서 삭제. 결과는 GET /recordings/transcribe/{job_id} 로 폴링
-    (`saved` 에 저장 위치). 같은 client_id 재전송은 Azure 없이 즉시 done(duplicate). 사용자당 동시 1건(429), IP 당 시간당 30건(429)."""
+    (`saved` 에 저장 위치). 같은 client_id 재전송은 Azure 없이 즉시 done(duplicate). 사용자당 동시 1건(429), IP 당 시간당 60건(429)."""
     if not azure_speech_service.is_configured():
         raise HTTPException(status_code=503, detail="Azure Speech is not configured")
     meta: TranscriptMeta | None = None

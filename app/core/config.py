@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # 비우면 POST /recordings/transcribe 가 503 (변환만 비활성, 부팅·녹음은 정상).
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = ""
+    # 서버 → Azure 동시 변환 요청 수 (2026-09-28 오너: 4 → 10). 업로드 수신은 제한 없고 이 수를 넘는 건은 서버 큐에서 대기한다.
+    # LMS 녹음 사이트와 같은 구독을 나눠 쓰므로 Azure 한도(429)에 맞춰 조정 — 429/5xx 는 azure_speech_service 가 백오프 재시도.
+    AZURE_CONCURRENCY: int = 10
     # 업로드 임시 파일 위치. 비우면 시스템 기본(/tmp). **프로덕션 LMS02 는 /tmp 가 tmpfs(RAM)** 라(2026-09-25 확인) 60MB×n 업로드가
     # 메모리를 먹는다 → 실제 디스크 경로를 준다 (예: /var/www/staff-app/tmp, svc-node 소유). Starlette 의 수신 임시본과
     # 우리 rec_* 둘 다 이 경로를 쓴다 (main.py 가 tempfile.tempdir 로 지정).

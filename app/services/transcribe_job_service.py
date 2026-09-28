@@ -26,7 +26,7 @@ from app.services import azure_speech_service, transcript_service
 from app.utils.mp4_faststart import ensure_faststart
 
 JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
-AZURE_CONCURRENCY = 4          # 동시 4건 — 수업·상담이 같은 시각에 끝나 10건이 몰려도 마지막 대기가 ~10분 이내
+AZURE_CONCURRENCY = max(1, int(settings.AZURE_CONCURRENCY))   # .env 로 조정 (기본 10, 2026-09-28) — 30건이 몰려도 3차례, 마지막 건 ~5분
 TEMP_PREFIX = "rec_"
 _jobs: dict[str, "TranscribeJob"] = {}
 _azure_slots = asyncio.Semaphore(AZURE_CONCURRENCY)

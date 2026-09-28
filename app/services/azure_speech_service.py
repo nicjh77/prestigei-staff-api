@@ -13,6 +13,7 @@
 텍스트 형식은 LMS recording 사이트(recording.prestigei.com)와 동일하게 맞춘다 (LMS 화면이 그대로 읽도록):
   문장마다 줄바꿈, 화자 분리(conversation)면 "Guest-{n}: 문장", 단일 화자(speech)면 접두어 없음.
 """
+import asyncio
 import json
 import time
 
@@ -23,6 +24,8 @@ from app.core.config import settings
 
 TRANSCRIBE_API_VERSION = "2024-11-15"
 AZURE_TIMEOUT_SEC = 600            # 2시간 파일도 여유 있게
+RETRY_STATUSES = {429, 500, 502, 503, 504}   # 한도 초과·일시 장애만 재시도. 422(오디오 형식) 등은 즉시 실패
+RETRY_BACKOFF_SEC = (5, 15, 45)              # 최대 3회 재시도 (총 4번 시도). 429 에 Retry-After 가 있으면 그 값 우선
 MAX_AUDIO_BYTES = 300 * 1024 * 1024
 SUPPORTED_LOCALES = {"ko-KR", "en-US", "ja-JP", "zh-CN", "es-ES", "fr-FR", "de-DE"}   # 사이트 드롭다운과 동일
 DEFAULT_LOCALE = "en-US"
@@ -55,8 +58,43 @@ def format_transcript(phrases: list[dict], combined: list[dict], diarize: bool) 
     return "\n".join(t for c in combined if (t := (c.get("text") or "").strip()))
 
 
+async def _post_with_retry(path: str, filename: str, content_type: str, definition: dict, transport=None) -> httpx.Response:
+    """Azure 에 multipart 로 보낸다. 429(한도)·5xx·네트워크 오류는 백오프 후 재시도 (2026-09-28 — 동시 수를 10으로 올리며 추가:
+    LMS 녹음 사이트와 구독을 나눠 써 한도에 닿을 수 있는데, 전에는 그 잡이 바로 failed 로 끝나 사용자가 파일을 다시 올려야 했다).
+    파일은 시도마다 다시 연다(httpx 가 스트리밍하므로 메모리에 올리지 않음)."""
+    last_exc: Exception | None = None
+    for attempt in range(len(RETRY_BACKOFF_SEC) + 1):
+        try:
+            with open(path, "rb") as f:
+                files = {
+                    "audio": (filename, f, content_type or "application/octet-stream"),
+                    "definition": (None, json.dumps(definition), "application/json"),
+                }
+                async with httpx.AsyncClient(timeout=AZURE_TIMEOUT_SEC, transport=transport) as client:
+                    r = await client.post(
+                        transcribe_endpoint(),
+                        headers={"Ocp-Apim-Subscription-Key": settings.AZURE_SPEECH_KEY},
+                        files=files,
+                    )
+            if r.status_code not in RETRY_STATUSES or attempt == len(RETRY_BACKOFF_SEC):
+                return r
+            wait = RETRY_BACKOFF_SEC[attempt]
+            ra = r.headers.get("Retry-After")
+            if r.status_code == 429 and ra and ra.isdigit():
+                wait = max(wait, min(int(ra), 120))
+            print(f"[azure] HTTP {r.status_code} on attempt {attempt + 1} — retrying in {wait}s", flush=True)
+        except httpx.TransportError as e:   # 연결 실패·타임아웃 등 — 응답 자체가 없음
+            last_exc = e
+            if attempt == len(RETRY_BACKOFF_SEC):
+                raise
+            wait = RETRY_BACKOFF_SEC[attempt]
+            print(f"[azure] {type(e).__name__} on attempt {attempt + 1} — retrying in {wait}s", flush=True)
+        await asyncio.sleep(wait)
+    raise last_exc or RuntimeError("Azure transcription failed")   # 도달하지 않음 (루프가 return/raise 로 끝난다)
+
+
 async def transcribe_file(path: str, filename: str, content_type: str, locale: str, diarize: bool,
-                          max_speakers: int = 2) -> dict:
+                          max_speakers: int = 2, transport=None) -> dict:
     """파일을 Azure Fast Transcription 에 넘기고 {transcript, duration_ms, phrases_count, azure_ms} 를 돌려준다."""
     if not is_configured():
         raise HTTPException(status_code=503, detail="Azure Speech is not configured")
@@ -64,17 +102,7 @@ async def transcribe_file(path: str, filename: str, content_type: str, locale: s
     if diarize:
         definition["diarization"] = {"maxSpeakers": max_speakers, "enabled": True}
     started = time.monotonic()
-    with open(path, "rb") as f:
-        files = {
-            "audio": (filename, f, content_type or "application/octet-stream"),
-            "definition": (None, json.dumps(definition), "application/json"),
-        }
-        async with httpx.AsyncClient(timeout=AZURE_TIMEOUT_SEC) as client:
-            r = await client.post(
-                transcribe_endpoint(),
-                headers={"Ocp-Apim-Subscription-Key": settings.AZURE_SPEECH_KEY},
-                files=files,
-            )
+    r = await _post_with_retry(path, filename, content_type, definition, transport)
     if r.status_code != 200:
         # 키 값은 절대 노출하지 않는다. Azure 메시지는 앞부분만.
         raise RuntimeError(f"Azure transcription failed (HTTP {r.status_code}): {r.text[:200]}")
