@@ -22,6 +22,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.services import azure_speech_service
+from app.utils.mp4_faststart import ensure_faststart
 
 JOB_TTL_SEC = 3600          # 결과 보관 1시간 (앱이 가져간 뒤엔 필요 없음)
 AZURE_CONCURRENCY = 4          # 동시 4건 — 수업·상담이 같은 시각에 끝나 10건이 몰려도 마지막 대기가 ~10분 이내
@@ -75,6 +76,13 @@ def start(job: TranscribeJob, tmp_path: str, filename: str, content_type: str, l
 
 async def _run(job: TranscribeJob, tmp_path: str, filename: str, content_type: str, locale: str, diarize: bool, max_speakers: int) -> None:
     try:
+        # Android m4a 는 인덱스(moov)가 파일 끝에 있어 큰 파일이면 Azure 가 422 InvalidAudioFormat 을 낸다 → 앞으로 옮긴다 (mp4_faststart 참조)
+        try:
+            tmp_path, moved = await asyncio.to_thread(ensure_faststart, tmp_path)
+            if moved:
+                print(f"[transcribe] job {job.id}: moved moov atom to front (faststart)", flush=True)
+        except Exception as e:  # noqa: BLE001 — 재배치 실패는 원본으로 진행
+            print(f"[transcribe] job {job.id}: faststart skipped ({e})", flush=True)
         async with _azure_slots:
             job.status = "running"
             result = await azure_speech_service.transcribe_file(tmp_path, filename, content_type, locale, diarize, max_speakers)
