@@ -39,3 +39,4 @@ class RecordingSessionOut(BaseModel):
     mine: bool                   # 로그인 사용자(t_user.tid)가 담당 교사인 일정
     has_record: bool = False     # 이 일정에 이미 녹취 텍스트가 있음 (앱/웹 어느 쪽이든) → 다시 녹음하면 뒤에 이어붙는다
     submitted: bool = False      # LMS 에서 제출(submitdate)돼 잠김 → 저장 불가(409). 앱은 선택을 막는다
+    record_updated_at: str | None = None   # 최신 녹취 행의 upddate (마지막 저장 시각, ET naive ISO) — 앱 TRANSCRIBED 배지 아래 "saved …"

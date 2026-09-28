@@ -33,7 +33,8 @@ _TUTOR_SQL = text("""
              THEN 'Not checked' ELSE e.attendance_name END AS attendance,
         CASE WHEN CONCAT(a.scdate, ' ', a.stime) < NOW() THEN 1 ELSE 0 END AS past,
         (SELECT IFNULL(r.transcript, '') <> '' FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS has_record,
-        (SELECT r.submitdate IS NOT NULL FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS submitted
+        (SELECT r.submitdate IS NOT NULL FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS submitted,
+        (SELECT r.upddate FROM t_tutor_record r WHERE r.scid = a.scid ORDER BY r.id DESC LIMIT 1) AS record_updated_at
     FROM t_tutorschedule a
         JOIN t_studentmain b ON a.sid = b.sid
         JOIN t_branch c ON a.bid = c.bid
@@ -58,7 +59,9 @@ _CLASS_SQL = text("""
         (SELECT IFNULL(r.transcript, '') <> '' FROM t_class_record r
           WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS has_record,
         (SELECT r.submitdate IS NOT NULL FROM t_class_record r
-          WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS submitted
+          WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS submitted,
+        (SELECT r.upddate FROM t_class_record r
+          WHERE r.cid = a.cid AND r.cdid = a.cdid AND IFNULL(r.ctid, 0) = IFNULL(t.ctid, 0) ORDER BY r.id DESC LIMIT 1) AS record_updated_at
     FROM t_classdate a
         JOIN t_classmain b ON a.cid = b.cid
         LEFT JOIN t_classteacher t ON a.cid = t.cid AND a.sdate = t.sdate AND t.stime <> ''
@@ -120,6 +123,10 @@ def resolve_bid_filter(acc: BranchAccess, bid: int | None) -> tuple[bool, list[i
     return (False, [bid])
 
 
+def _iso(v) -> str | None:
+    return v.strftime("%Y-%m-%dT%H:%M:%S") if v is not None else None
+
+
 def _hhmm(v) -> str | None:
     if v is None or v == "":
         return None
@@ -141,7 +148,7 @@ async def list_sessions(db: AsyncSession, user: User, kind: str, d: date, bid: i
                 branch=r.branch, bid=r.bid, date=str(r.scdate), start_time=_hhmm(r.stime), end_time=_hhmm(r.etime),
                 attendance=r.attendance, memo=r.memo or None, past=bool(r.past),
                 mine=(my_tid is not None and r.tid == my_tid),
-                has_record=bool(r.has_record), submitted=bool(r.submitted),
+                has_record=bool(r.has_record), submitted=bool(r.submitted), record_updated_at=_iso(r.record_updated_at),
             )
             for r in rows
         ]
@@ -153,7 +160,7 @@ async def list_sessions(db: AsyncSession, user: User, kind: str, d: date, bid: i
                 branch=r.branch, bid=r.bid, date=str(r.sdate), start_time=_hhmm(r.stime), end_time=_hhmm(r.etime),
                 attendance=None, memo=None, past=bool(r.past),
                 mine=(my_tid is not None and r.tid == my_tid),
-                has_record=bool(r.has_record), submitted=bool(r.submitted),
+                has_record=bool(r.has_record), submitted=bool(r.submitted), record_updated_at=_iso(r.record_updated_at),
             )
             for r in rows
         ]
