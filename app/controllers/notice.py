@@ -18,7 +18,7 @@ async def list_notices(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     items, total = await notice_service.list_notices(db, current_user, page, size)
     return PaginatedResponse(
@@ -30,6 +30,6 @@ async def list_notices(
 async def get_notice(
     notice_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     return await notice_service.get_notice(db, notice_id, current_user)

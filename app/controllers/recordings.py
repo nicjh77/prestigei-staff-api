@@ -27,7 +27,7 @@ def _today() -> date:
 
 
 @router.get("/branches", response_model=BranchAccessOut)
-async def branches(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def branches(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     """일정 선택 시트의 지점 목록 — 접근 가능한 지점만 (본인 소속 + t_permission_income 권한; 'HQ' 권한/HQ 소속은 전부)."""
     return await recording_session_service.list_branches(db, current_user)
 
@@ -38,7 +38,7 @@ async def sessions(
     date_: date | None = Query(None, alias="date", description="기본 오늘(ET)"),
     bid: int | None = Query(None, description="지점. 생략 = 본인 소속(HQ 소속은 전체), 0 = 접근 가능한 전체. 범위 밖 지점은 403"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """Tutoring(t_tutorschedule) / Class(t_classdate) 일정 목록 — 녹음을 어느 일정에 붙일지 고르는 용도.
     LMS recording 사이트의 목록과 같은 SQL. 지점 범위 = 본인 소속 + t_permission_income 권한('HQ' → 전부). 담당 교사 일정(mine)이 앞."""
@@ -51,8 +51,8 @@ _LANGUAGE_PATTERN = "^(" + "|".join(sorted(azure_speech_service.SUPPORTED_LOCALE
 
 
 async def _reject_oversized_body(request: Request) -> None:
-    """Content-Length 로 먼저 거른다 — Starlette 는 multipart 파일 파트를 크기 제한 없이 /tmp 에 다 받은 뒤에야 엔드포인트가 도니,
-    여기서 안 막으면 300MB 검사가 업로드가 끝난 뒤에 실행된다."""
+    """Content-Length 검사 2차 방어. **주의:** FastAPI 는 multipart 본문을 의존성보다 먼저 파싱하므로 이 검사는 파일이 이미 디스크에
+    내려온 뒤에 돈다 — 실제 사전 차단은 `app/core/upload_guard.py`(ASGI 미들웨어, 라우팅 이전)가 한다."""
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > azure_speech_service.MAX_AUDIO_BYTES + 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 300MB)")
@@ -84,7 +84,7 @@ async def transcribe(
     ctid: int | None = Form(None),
     save_mode: str = Form("append", pattern="^(append|replace)$", description="tutoring/class 에 기존 녹취가 있을 때 append(이어붙임) | replace(교체). 제출된 행은 둘 다 409"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """녹음 파일을 Azure 로 넘겨 텍스트로 변환하고, 메타(client_id/type/…)가 있으면 **서버가 변환 직후 LMS 테이블에 저장**한다
     (202 + job_id; 앱이 꺼져 있어도 끝까지 진행). 파일은 변환 직후 서버에서 삭제. 결과는 GET /recordings/transcribe/{job_id} 로 폴링
@@ -100,7 +100,7 @@ async def transcribe(
         # 이미 저장된 녹음의 재전송 → Azure 를 부르지 않고 바로 완료로 (중복 저장·과금 방지)
         prior = transcript_service.recall(current_user.id, meta.client_id)
         if prior:
-            job = transcribe_job_service.create(current_user.id, meta)
+            job = transcribe_job_service.create(current_user.id, meta, allow_busy=True)   # 다른 잡이 돌아도 즉시 done — 429 아님
             job.status, job.saved, job.finished = "done", prior, __import__("time").monotonic()
             return _job_out(job)
         # 일정 키가 실제 LMS 행인지 — 변환 비용을 쓰기 전에 거절 (404)
@@ -110,22 +110,25 @@ async def transcribe(
             raise HTTPException(status_code=422, detail="cid and cdid are required for class")
         await transcript_service.assert_session_exists(db, meta)
         await transcript_service.assert_not_locked(db, meta)   # 제출된 일정이면 409 — Azure 를 부르기 전에
+    await db.commit()   # 검증 끝 — 300MB 복사 동안 풀 커넥션을 잡고 있지 않게 먼저 반납 (get_db 의 종료 커밋은 빈 트랜잭션)
     # 잡 슬롯을 파일 복사 전에 잡는다 — 동시 1건 초과면 300MB 를 받아 놓고 거절하는 낭비가 없게
     job = transcribe_job_service.create(current_user.id, meta)
     ext = os.path.splitext(audio.filename or "")[1].lower()
     suffix = ext if ext in {".m4a", ".mp4", ".wav", ".mp3", ".aac", ".ogg", ".webm", ".flac"} else ".m4a"   # 클라이언트 문자열을 파일명에 그대로 쓰지 않는다
-    fd, tmp_path = tempfile.mkstemp(prefix="rec_", suffix=suffix)
+    tmp_path: str | None = None
     size = 0
     try:
+        fd, tmp_path = tempfile.mkstemp(prefix="rec_", suffix=suffix)   # try 안에서 — 실패(ENOSPC 등)해도 잡 슬롯이 반납되게
         with os.fdopen(fd, "wb") as out:
             while chunk := await audio.read(1024 * 1024):
                 size += len(chunk)
                 if size > azure_speech_service.MAX_AUDIO_BYTES:
                     raise HTTPException(status_code=413, detail="Audio file too large (max 300MB)")
                 out.write(chunk)
-    except Exception:
-        try: os.remove(tmp_path)
-        except OSError: pass
+    except BaseException:   # CancelledError(클라이언트 끊김·종료)도 포함 — 슬롯이 남으면 그 사용자는 재시작까지 429
+        if tmp_path:
+            try: os.remove(tmp_path)
+            except OSError: pass
         transcribe_job_service.discard(job)
         raise
     if size == 0:
@@ -153,7 +156,7 @@ async def transcribe_status(job_id: str, current_user: User = Depends(get_curren
 async def save_transcript(
     data: TranscriptSaveIn,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """변환된 텍스트를 LMS 녹취 테이블에 저장 — tutoring→t_tutor_record(scid, 이어붙임), class→t_class_record(cid,cdid,ctid),
     counseling→t_meeting_record(새 행). 제출(submitdate)된 일정은 409. 같은 client_id 재전송은 중복 저장 없이 이전 결과."""

@@ -20,7 +20,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
 async def update_me(
     data: UserProfileUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     return await user_service.update_profile(db, current_user, data)
 
@@ -29,7 +29,7 @@ async def update_me(
 async def change_password(
     data: PasswordChange,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     await user_service.change_password(db, current_user, data)
     return MessageResponse(message="Password changed")

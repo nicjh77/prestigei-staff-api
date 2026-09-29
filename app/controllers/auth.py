@@ -14,5 +14,5 @@ router = APIRouter(tags=["Auth"])
     response_model=TokenResponse,
     dependencies=[Depends(rate_limit(LOGIN_LIMIT, LOGIN_WINDOW, "login"))],
 )
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(data: LoginRequest, db: AsyncSession = Depends(get_db, scope="function")):
     return await auth_service.login(db, data)

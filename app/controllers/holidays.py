@@ -29,7 +29,7 @@ async def list_holidays(
     from_date: date = Query(default_factory=_month_start),
     to_date: date = Query(default_factory=_month_end),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """기간 내 휴일 목록 — 공휴일(t_datelist) + 내 지점 휴일(t_holiday) 병합 (기본: 이번 달)"""
     holidays = await holiday_service.get_holidays(db, current_user.bid, from_date, to_date)

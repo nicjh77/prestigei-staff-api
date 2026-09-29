@@ -15,7 +15,7 @@ router = APIRouter(tags=["Students"])
 async def search_students(
     q: str = Query(..., min_length=2, max_length=50, description="이름 부분 일치 (2자 이상)"),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """이름으로 학생 검색 — 최대 15건, 전 지점. 응답: sid / name / branch(등록 지점) / grade(등록 학년)."""
     return await student_service.search_students(db, q)

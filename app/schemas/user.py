@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserProfile(BaseModel):
@@ -19,10 +19,11 @@ class UserProfile(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
-    user_kname: str | None = None
-    user_ename: str | None = None
-    email: str | None = None
-    phone: str | None = None
+    # t_user 컬럼 폭 (varchar 200/200/200/45) — 넘기면 422. 없으면 커밋(응답 뒤)에서 터져 200 을 받고도 저장이 안 된다
+    user_kname: str | None = Field(None, max_length=200)
+    user_ename: str | None = Field(None, max_length=200)
+    email: str | None = Field(None, max_length=200)
+    phone: str | None = Field(None, max_length=45)
 
 
 class PasswordChange(BaseModel):

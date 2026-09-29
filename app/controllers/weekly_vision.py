@@ -13,7 +13,7 @@ router = APIRouter(tags=["Weekly Vision"])
 @router.get("", response_model=list[WeeklyVisionListOut])
 async def list_visions(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     visions = await weekly_vision_service.list_visions(db)
     return [WeeklyVisionListOut.model_validate(v) for v in visions]
@@ -22,7 +22,7 @@ async def list_visions(
 @router.get("/latest", response_model=WeeklyVisionOut)
 async def get_latest_vision(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     vision = await weekly_vision_service.get_latest_vision(db)
     return WeeklyVisionOut.model_validate(vision)
@@ -32,7 +32,7 @@ async def get_latest_vision(
 async def get_vision(
     vision_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     vision = await weekly_vision_service.get_vision(db, vision_id)
     return WeeklyVisionOut.model_validate(vision)

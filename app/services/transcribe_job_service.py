@@ -53,9 +53,10 @@ def _sweep() -> None:
         _jobs.pop(k, None)
 
 
-def create(user_id: int, meta: TranscriptMeta | None = None) -> TranscribeJob:
+def create(user_id: int, meta: TranscriptMeta | None = None, allow_busy: bool = False) -> TranscribeJob:
+    """allow_busy: 이미 저장된 녹음의 재전송처럼 즉시 done 으로 끝나는 잡 — 사용자당 1건 제한을 적용하지 않는다."""
     _sweep()
-    if any(j.user_id == user_id and j.finished is None for j in _jobs.values()):
+    if not allow_busy and any(j.user_id == user_id and j.finished is None for j in _jobs.values()):
         raise HTTPException(status_code=429, detail="A transcription is already running for this account. Wait for it to finish.")
     job = TranscribeJob(id=secrets.token_urlsafe(12), user_id=user_id, meta=meta)
     _jobs[job.id] = job
@@ -104,17 +105,18 @@ async def _run(job: TranscribeJob, tmp_path: str, filename: str, content_type: s
                 except HTTPException as e:          # 409 제출됨 / 404 일정 없음 등 — 텍스트는 앱에 보여주되 저장 실패로
                     job.status = "failed"
                     job.error = f"Transcribed but not saved to the LMS: {e.detail}"
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:  # noqa: BLE001 — DB 오류: SQL·파라미터가 섞인 메시지를 앱에 내보내지 않는다
                     job.status = "failed"
-                    job.error = f"Transcribed but not saved to the LMS: {str(e)[:200]}"
+                    job.error = "Transcribed but not saved to the LMS: database error"
+                    print(f"[transcribe] job {job.id} save error: {type(e).__name__}: {str(e)[:300]}", flush=True)
             else:
                 job.status = "done"
         saved_note = f", saved {job.saved.table}#{job.saved.id} ({job.saved.action})" if job.saved else (f", NOT saved: {job.error}" if job.transcript and job.status == "failed" else "")
         print(f"[transcribe] job {job.id} {job.status}: {result['phrases_count']} phrases, audio {result['duration_ms']} ms, azure {result['azure_ms']} ms{saved_note}", flush=True)
-    except Exception as e:  # noqa: BLE001 — 실패 사유를 앱에 그대로 보여준다(키 없음)
+    except Exception as e:  # noqa: BLE001 — 우리가 만든 메시지(RuntimeError, 키 없음)만 앱에 그대로, 그 외는 종류만
         job.status = "failed"
-        job.error = str(e)[:300]
-        print(f"[transcribe] job {job.id} failed: {job.error}", flush=True)
+        job.error = str(e)[:300] if isinstance(e, (RuntimeError, HTTPException)) else f"Transcription failed ({type(e).__name__})"
+        print(f"[transcribe] job {job.id} failed: {type(e).__name__}: {str(e)[:300]}", flush=True)
     finally:
         job.finished = time.monotonic()
         if job.status == "failed" and settings.KEEP_FAILED_UPLOADS == "1":

@@ -23,7 +23,7 @@ def _current_year() -> int:
 async def list_pto(
     year: int = Query(default_factory=_current_year, ge=2014, le=2100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """연도별 내 PTO 목록 + 휴가 잔여(배정/사용/남은 일수)"""
     return await pto_service.list_pto(db, current_user, year)
@@ -33,7 +33,7 @@ async def list_pto(
 async def create_pto(
     data: PtoCreate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """여러 날 제출 → 하루 1행씩 생성 (LMS와 동일). 과거 날짜 403, 같은 날 같은 타입 중복 409.
     dayoff는 휴일(공휴일·내 지점)을 자동 제외하고 `skipped`로 알려준다 (전부 휴일이면 400)."""
@@ -45,7 +45,7 @@ async def update_pto(
     schid: int,
     data: PtoUpdate,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     return await pto_service.update_pto(db, current_user, schid, data)
 
@@ -54,7 +54,7 @@ async def update_pto(
 async def delete_pto(
     schid: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     await pto_service.delete_pto(db, current_user, schid)
     return MessageResponse(message="PTO entry deleted")

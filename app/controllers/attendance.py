@@ -31,7 +31,7 @@ router = APIRouter(tags=["Attendance"])
 )
 async def scan(
     data: ScanRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """스캐너가 QR 읽고 호출 — 토큰 검증 후 출퇴근 기록"""
     record = await attendance_service.process_scan(db, data)
@@ -45,7 +45,7 @@ async def scan(
 )
 async def manual_scan(
     data: ManualScanRequest,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """키오스크 이름 검색 → 직원 선택 시 호출 — 인증 없이 wid로 바로 출퇴근 기록"""
     record = await attendance_service.process_manual(db, data)
@@ -55,7 +55,7 @@ async def manual_scan(
 @router.get("/today", response_model=TodayAttendance)
 async def today(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     records = await attendance_service.get_today_records(db, current_user.id)
     day_info = await attendance_service.get_day_info(db, current_user)
@@ -72,7 +72,7 @@ async def calendar_view(
     year: int | None = Query(default=None, ge=2014, le=2100),
     month: int | None = Query(default=None, ge=1, le=12),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     """월 단위 출퇴근 캘린더 — 일자별 출근/휴일/휴가 상태 + 요약 (기본: 이번 달, ET)"""
     now = datetime.now(APP_TZ)
@@ -86,7 +86,7 @@ async def history(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     records, total = await attendance_service.get_history(db, current_user.id, from_date, to_date, page, size)
     items = [AttendanceRecordOut.model_validate(r) for r in records]

@@ -83,7 +83,8 @@ async def _post_with_retry(path: str, filename: str, content_type: str, definiti
             if r.status_code == 429 and ra and ra.isdigit():
                 wait = max(wait, min(int(ra), 120))
             print(f"[azure] HTTP {r.status_code} on attempt {attempt + 1} — retrying in {wait}s", flush=True)
-        except httpx.TransportError as e:   # 연결 실패·타임아웃 등 — 응답 자체가 없음
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.WriteTimeout, httpx.WriteError, httpx.PoolTimeout) as e:
+            # 연결·전송 단계 실패만 재시도. ReadTimeout(응답 대기 초과)은 Azure 가 이미 받아 처리(과금)했을 수 있어 재시도하지 않는다
             last_exc = e
             if attempt == len(RETRY_BACKOFF_SEC):
                 raise

@@ -106,13 +106,14 @@ def send_fcm_push(
                 result.failure_count += 1
                 exc = resp.exception
                 result.errors.append(type(exc).__name__ if exc else "unknown")
-                # 영구 무효 토큰만 비활성화 — 일시적 오류(Unavailable/Internal)는 살려둔다
+                # 영구 무효 토큰만 비활성화 — 일시적 오류(Unavailable/Internal)는 살려둔다.
+                # InvalidArgumentError 는 제외 (QA 2026-09-29): **메시지**가 잘못돼도(4KB 초과 본문, 예약 data 키) 같은 오류가
+                # 배치의 모든 토큰에 붙어 전 사용자 토큰이 한 번에 꺼진다. 토큰 형식 오류는 Unregistered 로도 걸러진다.
                 if isinstance(
                     exc,
                     (
                         messaging.UnregisteredError,
                         messaging.SenderIdMismatchError,
-                        fb_exceptions.InvalidArgumentError,
                     ),
                 ):
                     result.invalid_tokens.append(token)

@@ -6,13 +6,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.exceptions import add_exception_handlers
+from app.core.upload_guard import UploadGuardMiddleware
 from app.core.config import settings
 from app.core.router import routers
 from app.services.transcribe_job_service import sweep_temp_files
 
-# 프로덕션에서는 대화형 문서/OpenAPI 스키마를 비공개 처리해 엔드포인트 노출을 줄인다.
-_is_prod = os.getenv("APP_ENV", "") == "production"
-_docs_kwargs = dict(docs_url=None, redoc_url=None, openapi_url=None) if _is_prod else {}
+# 대화형 문서/OpenAPI 스키마는 로컬(APP_ENV=local)에서만 연다. 프로덕션은 APP_ENV **미설정**으로 .env 를 읽으므로
+# "production 일 때 끈다" 조건은 실서버에서 한 번도 참이 아니었다 (QA 2026-09-29: /docs, /openapi.json 이 200). ENABLE_DOCS=1 로 강제 개방 가능.
+_docs_enabled = os.getenv("APP_ENV", "") == "local" or os.getenv("ENABLE_DOCS", "") == "1"
+_docs_kwargs = {} if _docs_enabled else dict(docs_url=None, redoc_url=None, openapi_url=None)
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
@@ -37,6 +39,7 @@ app = FastAPI(title="PrestigeI Staff API", version="1.0.0", lifespan=_lifespan, 
 
 API_PREFIX = "/api/v1"
 
+app.add_middleware(UploadGuardMiddleware)   # 녹음 업로드: 본문 수신 전 401/413 (app/core/upload_guard.py)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:4300"],

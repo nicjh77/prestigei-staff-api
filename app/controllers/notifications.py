@@ -21,19 +21,19 @@ async def list_notifications(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     return await notification_service.get_notifications(db, current_user.id, page, size)
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)
-async def unread_count(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def unread_count(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     count = await notification_service.get_unread_count(db, current_user.id)
     return UnreadCountResponse(unread_count=count)
 
 
 @router.patch("/{recipient_id}/read", response_model=MessageResponse)
-async def mark_read(recipient_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def mark_read(recipient_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     ok = await notification_service.mark_as_read(db, current_user.id, recipient_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Notification not found")
@@ -41,19 +41,19 @@ async def mark_read(recipient_id: int, current_user: User = Depends(get_current_
 
 
 @router.patch("/read-all", response_model=MessageResponse)
-async def mark_all_read(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def mark_all_read(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     count = await notification_service.mark_all_as_read(db, current_user.id)
     return MessageResponse(message=f"{count} notifications marked as read")
 
 
 @router.post("/token", response_model=MessageResponse)
-async def register_token(data: PushTokenRegister, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def register_token(data: PushTokenRegister, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     await notification_service.register_token(db, current_user, data)
     return MessageResponse(message="Token registered")
 
 
 @router.delete("/token", response_model=MessageResponse)
-async def deregister_token(device_id: str = Query(...), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def deregister_token(device_id: str = Query(...), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     await notification_service.deregister_token(db, current_user, device_id)
     return MessageResponse(message="Token deregistered")
 
@@ -63,7 +63,7 @@ async def send_notification(
     data: SendNotificationRequest,
     background_tasks: BackgroundTasks,
     _auth: None = Depends(require_admin_or_api_key),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     # 로그 + 수신자 레코드를 만들고 발송은 응답 이후 백그라운드에서 처리한다.
     log_id = await notification_service.prepare_notification(db, data)

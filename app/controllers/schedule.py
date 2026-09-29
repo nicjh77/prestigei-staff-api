@@ -29,7 +29,7 @@ async def get_schedule(
     from_date: date = Query(default_factory=_week_start),
     to_date: date = Query(default_factory=_week_end),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     schedules = await schedule_service.get_schedule(db, current_user, from_date, to_date)
     return [ScheduleOut.model_validate(s) for s in schedules]

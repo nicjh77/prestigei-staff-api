@@ -158,8 +158,8 @@ async def dispatch_notification(
                 send_result = await anyio.to_thread.run_sync(
                     send_push_notifications,
                     tokens,
-                    _strip_html(title),
-                    _strip_html(body),
+                    _strip_html(title)[:200],
+                    _strip_html(body)[:1000],   # FCM 페이로드 4KB 한도 — 배너는 앞부분만, DB 원본은 그대로 (앱 모달이 전체 표시)
                     {**(data or {}), "notification_id": str(log_id)},
                 )
                 invalid_tokens = send_result.invalid_tokens

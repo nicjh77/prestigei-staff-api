@@ -17,7 +17,7 @@ bearer_scheme_optional = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> User:
     token = credentials.credentials
     try:
@@ -48,7 +48,7 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
 async def require_admin_or_api_key(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme_optional),
     x_api_key: str | None = Header(None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> None:
     """Allow access if the request carries a valid admin JWT OR a valid LMS API key."""
     # Try API key first

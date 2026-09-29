@@ -37,8 +37,18 @@ _store: dict[str, dict] | None = None
 _store_lock = asyncio.Lock()
 
 
+_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")   # <project>/data
+
+
 def _store_path() -> str:
-    return os.path.join(tempfile.gettempdir(), "transcript_saved.json")
+    """저장 기록(30일 중복 방지)은 임시 폴더가 아니라 프로젝트의 data/ 에 둔다 — UPLOAD_TMP_DIR 폴백(/tmp=RAM)이나 재부팅에
+    비워지면 같은 녹음이 Azure 재과금 + LMS 이중 저장된다 (QA 2026-09-29). data/ 를 못 만들면 임시 폴더로 폴백하고 경고."""
+    try:
+        os.makedirs(_DATA_DIR, exist_ok=True)
+        return os.path.join(_DATA_DIR, "transcript_saved.json")
+    except OSError as e:
+        print(f"[transcript] WARNING: data dir {_DATA_DIR!r} unusable ({e}); using temp dir", flush=True)
+        return os.path.join(tempfile.gettempdir(), "transcript_saved.json")
 
 
 def _load_store() -> dict[str, dict]:

@@ -93,6 +93,18 @@ def ensure_faststart(path: str) -> tuple[str, bool]:
         if not _patch_offsets(moov, m_size):
             return path, False
         out_path = f"{os.path.splitext(path)[0]}_fs{os.path.splitext(path)[1]}"
+        try:
+            _write_faststart(f, out_path, atoms, moov)
+        except BaseException:
+            try: os.remove(out_path)   # 디스크 부족 등으로 반쯤 쓴 복사본을 남기지 않는다 (음성 미보관 원칙)
+            except OSError: pass
+            raise
+    os.remove(path)
+    return out_path, True
+
+
+def _write_faststart(f, out_path: str, atoms, moov: bytearray) -> None:
+    if True:
         with open(out_path, "wb") as out:
             # moov 앞의 아톰(ftyp, free …)은 그대로, 그 다음 moov', 그 다음 나머지(mdat …) — moov 원래 자리는 건너뛴다
             for typ, off, asize, _ in atoms:
@@ -108,5 +120,3 @@ def ensure_faststart(path: str) -> tuple[str, bool]:
                         break
                     out.write(buf)
                     remaining -= len(buf)
-    os.remove(path)
-    return out_path, True

@@ -15,7 +15,7 @@ router = APIRouter(tags=["Announcements"])
 
 
 @router.get("/unread-count", response_model=UnreadCountOut)
-async def unread_count(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def unread_count(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     count = await announcement_service.get_unread_count(db, current_user)
     return UnreadCountOut(count=count)
 
@@ -26,7 +26,7 @@ async def list_announcements(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     items, total, read_ids = await announcement_service.list_announcements(db, current_user, unread_only, page, size)
     out = [
@@ -41,7 +41,7 @@ async def list_announcements(
 
 
 @router.get("/{announcement_id}", response_model=AnnouncementOut)
-async def get_announcement(announcement_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_announcement(announcement_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db, scope="function")):
     ann = await announcement_service.get_announcement(db, announcement_id, current_user)
     return AnnouncementOut(
         id=ann.id, title=ann.title, content=ann.content, target_role=ann.target_role,
