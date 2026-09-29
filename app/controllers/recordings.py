@@ -109,6 +109,7 @@ async def transcribe(
         if meta.type == "class" and (meta.cid is None or meta.cdid is None):
             raise HTTPException(status_code=422, detail="cid and cdid are required for class")
         await transcript_service.assert_session_exists(db, meta)
+        await transcript_service.assert_not_locked(db, meta)   # 제출된 일정이면 409 — Azure 를 부르기 전에
     # 잡 슬롯을 파일 복사 전에 잡는다 — 동시 1건 초과면 300MB 를 받아 놓고 거절하는 낭비가 없게
     job = transcribe_job_service.create(current_user.id, meta)
     ext = os.path.splitext(audio.filename or "")[1].lower()

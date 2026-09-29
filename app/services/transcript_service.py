@@ -89,7 +89,7 @@ async def _upsert_linked(db: AsyncSession, table: str, where: str, params: dict,
         r = await db.execute(text(f"INSERT INTO {table} ({insert_cols}, transcript, upddate) VALUES ({insert_vals}, :t, :ts)"), {**params, "t": transcript, "ts": ts})
         return TranscriptSaveOut(table=table, id=int(r.lastrowid), action="inserted")
     if row.submitdate is not None:
-        raise HTTPException(status_code=409, detail="This session's transcript was already submitted in the LMS and is locked")
+        raise HTTPException(status_code=409, detail=LOCKED_DETAIL)
     existing = (row.transcript or "").rstrip()
     if save_mode == "replace":
         # 사용자가 일정 선택 시 "Replace" 를 고른 경우 — 기존 텍스트(앱/웹 어느 쪽이 넣었든)를 버리고 새 텍스트로. 행은 그대로(id 유지).
@@ -114,6 +114,23 @@ async def assert_session_exists(db: AsyncSession, data: TranscriptMeta) -> None:
             ok = (await db.execute(text("SELECT 1 FROM t_classteacher WHERE ctid = :ctid AND cid = :cid LIMIT 1"), {"ctid": data.ctid, "cid": data.cid})).first()
             if not ok:
                 raise HTTPException(status_code=404, detail="Class teacher row not found")
+
+
+LOCKED_DETAIL = "This session's transcript was already submitted in the LMS and is locked"
+
+
+async def assert_not_locked(db: AsyncSession, data: TranscriptMeta) -> None:
+    """튜터/수업 일정의 최신 녹취 행이 제출(submitdate)돼 있으면 409 — 업로드 직후·Azure 호출 전에 거절해 변환 비용을 쓰지 않게
+    (2026-09-29: 앱 배지가 SUBMITTED 를 보여줘도 잠기기 전에 녹음해 둔 미전송 건이 뒤늦게 올라올 수 있다). 저장 시점에도 같은 검사를 한다."""
+    if data.type == "tutoring":
+        row = (await db.execute(text("SELECT submitdate FROM t_tutor_record WHERE scid = :scid ORDER BY id DESC LIMIT 1"), {"scid": data.scid})).first()
+    elif data.type == "class":
+        row = (await db.execute(text("SELECT submitdate FROM t_class_record WHERE cid = :cid AND cdid = :cdid AND IFNULL(ctid, 0) = :ctid ORDER BY id DESC LIMIT 1"),
+                                {"cid": data.cid, "cdid": data.cdid, "ctid": data.ctid or 0})).first()
+    else:
+        return
+    if row is not None and row.submitdate is not None:
+        raise HTTPException(status_code=409, detail=LOCKED_DETAIL)
 
 
 async def save_transcript(db: AsyncSession, data: TranscriptSaveIn) -> TranscriptSaveOut:
